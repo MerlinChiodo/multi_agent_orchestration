@@ -2,6 +2,7 @@
 import time, os, csv
 from contextlib import contextmanager
 from typing import Iterable
+from typing import Optional
 
 _DEFAULT_FIELDS: list[str] = [
     "engine",          # "langchain" | "langgraph" | "dspy"
@@ -14,6 +15,33 @@ _DEFAULT_FIELDS: list[str] = [
     "critic_s",
     "integrator_s",
 ]
+
+# Optionale W&B-Integration (nur wenn installiert und aktiviert)
+_WANDB_ENABLED = os.getenv("WANDB_ENABLED", "").lower() in {"1", "true", "yes", "on"}
+_WANDB_PROJECT = os.getenv("WANDB_PROJECT") or "multi_agent_orchestration"
+_WANDB_ENTITY = os.getenv("WANDB_ENTITY")
+_wandb_run = None
+
+def _get_wandb():
+    global _wandb_run
+    if not _WANDB_ENABLED:
+        return None
+    if _wandb_run is not None:
+        return _wandb_run
+    try:
+        import wandb
+        _wandb_run = wandb.init(
+            project=_WANDB_PROJECT,
+            entity=_WANDB_ENTITY,
+            reinit=False,
+            anonymous="allow",
+            settings=wandb.Settings(start_method="thread"),
+        )
+        return _wandb_run
+    except Exception:
+        _wandb_run = None
+        return None
+
 
 def _ensure_fields(row: dict) -> list[str]:
     """Nimmt die Default-Spalten und erweitert sie um evtl. zusätzliche Keys aus row (stabile Reihenfolge)."""
@@ -87,3 +115,10 @@ def log_row(row: dict, path: str = "telemetry.csv"):
         if not exists:
             w.writeheader()
         w.writerow(row)
+    # optional: W&B Log
+    run = _get_wandb()
+    if run:
+        try:
+            run.log(row)
+        except Exception:
+            pass

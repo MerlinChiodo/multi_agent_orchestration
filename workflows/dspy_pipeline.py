@@ -25,6 +25,8 @@ try:
 except Exception:
     HAVE_LITELLM = False
 
+DSPY_READY = HAVE_DSPY and HAVE_LITELLM
+
 
 def _lean_fallback(msg: str) -> Dict[str, Any]:
     return {
@@ -38,29 +40,31 @@ def _lean_fallback(msg: str) -> Dict[str, Any]:
         "integrator_s": 0.0,
         "latency_s": 0.0,
         "graph_dot": None,
+        "dspy_available": DSPY_READY,
     }
 
 
-if not (HAVE_DSPY and HAVE_LITELLM):
+if not DSPY_READY:
     # Stub, damit die App nicht crasht wenn Pakete fehlen
-    def run_pipeline(input_text: str, cfg: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    def run_pipeline(input_text: str, cfg: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         why = "missing 'dspy-ai'" if not HAVE_DSPY else "missing 'litellm'"
         return _lean_fallback(f"install dspy-ai and litellm to enable DSPy ({why}).")
 else:
     # ---------------- DSPy: Konfiguration & Module ----------------
 
     # Provider-Fix: LiteLLM erwartet "ollama/<model>"
-    def _configure_dspy(cfg: Dict[str, Any] | None = None):
+    def _configure_dspy(cfg: Optional[Dict[str, Any]] = None):
         cfg = cfg or {}
-        model = cfg.get("model", "qwen2.5:1.5b")
-        base = cfg.get("api_base", "http://127.0.0.1:11434")
+        model = cfg.get("model", "gpt-4.1")
+        base = cfg.get("api_base") or os.getenv("OPENAI_BASE_URL")
+        api_key = cfg.get("api_key") or os.getenv("OPENAI_API_KEY", "")
         temperature = float(cfg.get("temperature", 0.0))
         max_tokens = int(cfg.get("max_tokens", 256))
 
         lm = dspy.LM(
-            model=f"ollama/{model}",
+            model=model,
             api_base=base,
-            api_key="",  # für Ollama nicht nötig
+            api_key=api_key,
             temperature=temperature,
             max_tokens=max_tokens,
         )
@@ -264,7 +268,7 @@ else:
         ])
 
     # ---------------- Public API ----------------
-    def run_pipeline(input_text: str, cfg: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    def run_pipeline(input_text: str, cfg: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         cfg = cfg or {}
         _configure_dspy(cfg)
 
@@ -285,7 +289,9 @@ else:
             "critic_s": out.critic_s,
             "integrator_s": out.integrator_s,
             "latency_s": round(t1 - t0, 2),
+            "input_chars": len(input_text or ""),
             "graph_dot": None,  # nur LangGraph
+            "dspy_available": True,
         }
 
         # Telemetrie-CSV (so wie bei LangChain)

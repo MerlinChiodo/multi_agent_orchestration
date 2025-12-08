@@ -1,130 +1,95 @@
+"""
+LangChain Pipeline: Sequenzielle Ausführung der Multi-Agent-Pipeline.
+"""
+
+from typing import Optional, Dict, Any
+from time import perf_counter
+
 from agents.reader import run as run_reader
 from agents.summarizer import run as run_summarizer
 from agents.critic import run as run_critic
 from agents.integrator import run as run_integrator
 from telemetry import log_row
 from llm import configure
-from time import perf_counter
+from utils import build_analysis_context
 
 
-def _truncate_text(text: str, max_chars: int | None) -> str:
-    """Truncate input text to n characters."""
-    text = text or ""
-    if not max_chars:
-        return text
-    return text[:max_chars] if len(text) > max_chars else text
-
-
-def _extract_sections(input_text: str) -> dict:
+def run_pipeline(input_text: str, config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """
-    Split paper into main sections if possible.
-    Returns a dictionary with {section_name: text}.
+    Führt LangChain-Pipeline sequenziell aus: Reader → Summarizer → Critic → Integrator.
+    
+    Gibt Dictionary zurück mit: structured, summary, critic, meta, Timing-Infos und Gesamt-Latenz.
     """
-    sections = {
-        "abstract": "",
-        "introduction": "",
-        "methods": "",
-        "results": "",
-        "discussion": "",
-        "conclusion": "",
+    config_dict = config or {}
+    configure(config_dict)
+    
+    analysis_context = build_analysis_context(input_text, config_dict)
+    
+    if not analysis_context or len(analysis_context.strip()) < 100:
+        return _create_error_response(
+            "No valid text detected. Try disabling truncation or re-uploading the PDF."
+        )
+    
+    start_time_reader = perf_counter()
+    structured_notes = run_reader(analysis_context)
+    end_time_reader = perf_counter()
+    reader_duration = round(end_time_reader - start_time_reader, 2)
+    
+    start_time_summarizer = perf_counter()
+    summary = run_summarizer(structured_notes)
+    end_time_summarizer = perf_counter()
+    summarizer_duration = round(end_time_summarizer - start_time_summarizer, 2)
+    
+    start_time_critic = perf_counter()
+    critic_result = run_critic(notes=structured_notes, summary=summary)
+    critic_text = critic_result.get("critic") or critic_result.get("critique") or ""
+    end_time_critic = perf_counter()
+    critic_duration = round(end_time_critic - start_time_critic, 2)
+    
+    start_time_integrator = perf_counter()
+    meta_summary = run_integrator(notes=structured_notes, summary=summary, critic=critic_text)
+    end_time_integrator = perf_counter()
+    integrator_duration = round(end_time_integrator - start_time_integrator, 2)
+    
+    total_duration = round(end_time_integrator - start_time_reader, 2)
+    input_chars = len(analysis_context)
+    timing_statistics = {
+        "reader_s": reader_duration,
+        "summarizer_s": summarizer_duration,
+        "critic_s": critic_duration,
+        "integrator_s": integrator_duration,
     }
-
-    lowered = input_text.lower()
-    positions = {}
-    for key in sections.keys():
-        idx = lowered.find(key)
-        if idx != -1:
-            positions[key] = idx
-
-    keys_sorted = sorted(positions.items(), key=lambda x: x[1])
-
-    for i, (key, start) in enumerate(keys_sorted):
-        end = keys_sorted[i + 1][1] if i + 1 < len(keys_sorted) else len(input_text)
-        sections[key] = input_text[start:end].strip()
-
-    return sections
-
-
-def run_pipeline(input_text: str, cfg: dict | None = None) -> dict:
-    """Full LangChain pipeline (Reader → Summarizer → Critic → Integrator)."""
-    cfg = cfg or {}
-    configure(cfg)
-
-    truncated_text = _truncate_text(input_text, cfg.get("truncate_chars"))
-
-    if not truncated_text or len(truncated_text.strip()) < 100:
-        return {
-            "structured": "[Input empty or too short]",
-            "summary": "",
-            "critic": "",
-            "meta": "⚠️ No valid text detected. Try disabling truncation or re-uploading the PDF.",
-            "reader_s": 0.0,
-            "summarizer_s": 0.0,
-            "critic_s": 0.0,
-            "integrator_s": 0.0,
-        }
-
-    # Extract sections if possible
-    sections = _extract_sections(truncated_text)
-
-    # Combine key sections for summarization
-    combined_text = (
-        sections["abstract"]
-        + "\n\n"
-        + sections["introduction"]
-        + "\n\n"
-        + sections["methods"]
-        + "\n\n"
-        + sections["results"]
-        + "\n\n"
-        + sections["discussion"]
-        + "\n\n"
-        + sections["conclusion"]
-    ).strip() or truncated_text
-
-    # --- Run agents sequentially ---
-    t0 = perf_counter()
-    reader_output = run_reader(combined_text)
-    t1 = perf_counter()
-
-    summarizer_output = run_summarizer(reader_output)
-    t2 = perf_counter()
-
-    # ✅ UPDATED: critic compares summary vs reader notes
-    critic_dict = run_critic(notes=reader_output, summary=summarizer_output)
-    critic_output = critic_dict.get("critic") or critic_dict.get("critique") or ""
-    t3 = perf_counter()
-
-    # ✅ UPDATED: integrator fuses notes + summary + critic
-    integrator_output = run_integrator(
-        notes=reader_output, summary=summarizer_output, critic=critic_output
-    )
-    t4 = perf_counter()
-
-    # ✅ UPDATED timing
-    timings = {
-        "reader_s": round(t1 - t0, 2),
-        "summarizer_s": round(t2 - t1, 2),
-        "critic_s": round(t3 - t2, 2),
-        "integrator_s": round(t4 - t3, 2),
-    }
-    total_time = round(t4 - t0, 2)
-
-    log_row(
-        {
-            "engine": "langchain",
-            "input_chars": len(truncated_text),
-            "summary_len": len(str(summarizer_output)),
-            "meta_len": len(str(integrator_output)),
-            "latency_s": total_time,
-            **timings,
-        }
-    )
-
+    
+    log_row({
+        "engine": "langchain",
+        "input_chars": input_chars,
+        "summary_len": len(str(summary)),
+        "meta_len": len(str(meta_summary)),
+        "latency_s": total_duration,
+        **timing_statistics,
+    })
+    
+    # Ergebnis zusammenstellen
     return {
-        "structured": reader_output,
-        "summary": summarizer_output,
-        "critic": critic_output,
-        "meta": integrator_output,
-        **timings,
+        "structured": structured_notes,
+        "summary": summary,
+        "critic": critic_text,
+        "meta": meta_summary,
+        "latency_s": total_duration,
+        "input_chars": input_chars,
+        **timing_statistics,
+    }
+
+
+def _create_error_response(error_message: str) -> Dict[str, Any]:
+    """Erstellt standardisierte Fehlerantwort."""
+    return {
+        "structured": "[Input empty or too short]",
+        "summary": "",
+        "critic": "",
+        "meta": error_message,
+        "reader_s": 0.0,
+        "summarizer_s": 0.0,
+        "critic_s": 0.0,
+        "integrator_s": 0.0,
     }
