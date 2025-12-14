@@ -14,6 +14,7 @@ Die meisten Teilnehmer starten hier.
 ## Für Moderatoren
 
 Die Moderatorenunterlagen stehen in `moderators/`. Sie enthalten Zeitpläne, Checklisten und Hinweise zur Code-Verteilung.
+- `moderators/FOLIENSKRIPT_WORKSHOP.md`: Slide-by-Slide Sprechskript (Intro → Praxis → Wrap-Up)
 
 ## Projektüberblick
 

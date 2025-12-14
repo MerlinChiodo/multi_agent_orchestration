@@ -3,6 +3,8 @@
 
 Ziel: Workshop in exakt 60 Minuten durchführen. Teilnehmer arbeiten direkt mit der App und folgen dem Teilnehmer-Skript.
 
+Für eine „Folien + Sprechtext“-Variante (zum Durchklicken im Workshop) siehe: `docs/moderators/FOLIENSKRIPT_WORKSHOP.md`.
+
 ---
 
 ## Vorbereitung (10 Minuten vor Start)
