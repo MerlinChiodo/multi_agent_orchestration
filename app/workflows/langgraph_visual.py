@@ -14,13 +14,21 @@ def graph_dot():
         ];
 
         input      [label="Input (Text)"];
-        reader     [label="Reader (strukturieren)"];
+        reader     [label="Reader (Notes)"];
         summarizer [label="Summarizer"];
+        translator [label="Translator (DE/EN)"];
+        keyword    [label="Keyword Extraction"];
         critic     [label="Critic"];
+        quality    [label="Quality (F1)"];
+        judge      [label="Judge"];
+        aggregator [label="Judge Aggregate"];
         integrator [label="Integrator"];
         output     [label="Output (Structured, Summary, Critic, Meta)"];
 
-        input -> reader -> summarizer -> critic -> integrator -> output;
+        input -> reader -> summarizer -> translator -> keyword -> critic;
+        critic -> quality -> judge -> aggregator -> integrator -> output;
+        critic -> judge [label="kurze Summary", style="dashed"];
+        critic -> summarizer [label="schlechter Critic Score", style="dotted"];
     }
     """.strip()
     st.graphviz_chart(dot, use_container_width=True)

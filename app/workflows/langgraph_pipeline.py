@@ -8,6 +8,7 @@ from typing import TypedDict, Dict, Any, Optional, Callable
 from time import perf_counter
 import concurrent.futures as cf
 import re
+from collections import Counter
 
 from langgraph.graph import StateGraph, END
 
@@ -33,6 +34,13 @@ class PipelineState(TypedDict):
     summarizer_s: float
     critic_s: float
     integrator_s: float
+    translator_s: float
+    keyword_s: float
+    summary_translated: str
+    keywords: str
+    judge_aggregate: float
+    critic_score: float
+    critic_loops: int
     quality_f1: float
     judge_score: float
     _timeout: int
@@ -104,6 +112,70 @@ def _execute_critic_node(state: PipelineState) -> PipelineState:
     return state
 
 
+def _extract_critic_score(state: PipelineState) -> float:
+    """Schätzung eines numerischen Kritiker-Scores aus dem Critic-Text."""
+    text = state.get("critic", "") or ""
+    match = re.search(r"([0-9]+(?:\\.[0-9]+)?)", text)
+    if match:
+        score = float(match.group(1))
+    else:
+        score = state.get("quality_f1", 0.0)
+    if score > 1.0:
+        score = min(score / 5.0, 1.0)
+    score = max(0.0, min(score, 1.0))
+    state["critic_score"] = round(score, 3)
+    return state["critic_score"]
+
+
+def _execute_translator_node(state: PipelineState) -> PipelineState:
+    """Graph-Knoten: Dummy-Übersetzer (Deutsch/Englisch) plus Kürzung."""
+    start_time = perf_counter()
+    summary = state.get("summary", "") or ""
+    cfg = state.get("_config", {}) or {}
+    language = cfg.get("translator_language", "DE").upper()
+    style = cfg.get("translator_style", "short")
+    max_chars = len(summary)
+    if style == "short":
+        max_chars = min(120, len(summary))
+    elif style == "ultra_short":
+        max_chars = min(80, len(summary))
+    truncated = summary if not max_chars else summary[:max_chars]
+    truncated = truncated.strip()
+    translation = f"[{language}] {truncated}"
+    if len(truncated) < len(summary):
+        translation = f"{translation}…"
+    state["summary_translated"] = translation
+    state["translator_s"] = round(perf_counter() - start_time, 2)
+    return state
+
+
+def _execute_keyword_node(state: PipelineState) -> PipelineState:
+    """Graph-Knoten: Extrahiert Keywords aus der Summary."""
+    start_time = perf_counter()
+    summary = state.get("summary", "") or ""
+    tokens = [token.lower() for token in re.findall(r"\\w+", summary) if len(token) > 3]
+    freq = Counter(tokens)
+    most_common = [token for token, _ in freq.most_common(6)]
+    state["keywords"] = ", ".join(most_common)
+    state["keyword_s"] = round(perf_counter() - start_time, 2)
+    return state
+
+
+def _critic_post_path(state: PipelineState) -> str:
+    """Entscheidet nach dem Critic-Node über den nächsten Schritt."""
+    _extract_critic_score(state)
+    summary = state.get("summary", "") or ""
+    loops = state.get("critic_loops", 0)
+    cfg = state.get("_config", {}) or {}
+    max_loops = max(0, int(cfg.get("max_critic_loops", 1)))
+    if state["critic_score"] < 0.5 and loops < max_loops:
+        state["critic_loops"] = loops + 1
+        return "summarizer"
+    if len(summary) < 100:
+        return "judge"
+    return "quality"
+
+
 def _tokens(s: str) -> set[str]:
     s = s.lower()
     s = re.sub(r"[^a-z0-9\s]", " ", s)
@@ -148,6 +220,17 @@ def _execute_judge_node(state: PipelineState) -> PipelineState:
     return state
 
 
+def _execute_aggregator_node(state: PipelineState) -> PipelineState:
+    """Graph-Knoten: Aggregiert Judge-, Quality- und Critic Scores."""
+    quality = state.get("quality_f1", 0.0)
+    judge_norm = state.get("judge_score", 0.0) / 5.0
+    critic = state.get("critic_score", 0.0)
+    candidates = [value for value in (quality, judge_norm, critic) if value is not None and value > 0]
+    aggregate = round(sum(candidates) / len(candidates), 3) if candidates else 0.0
+    state["judge_aggregate"] = aggregate
+    return state
+
+
 def _execute_integrator_node(state: PipelineState) -> PipelineState:
     """Graph-Knoten: Integrator-Agent ausführen."""
     start_time = perf_counter()
@@ -163,7 +246,6 @@ def _execute_integrator_node(state: PipelineState) -> PipelineState:
 
 def _generate_graph_visualization_dot(state: Optional[PipelineState] = None) -> str:
     """Generiert Graphviz DOT-Darstellung des Workflows mit optionalen dynamischen Werten."""
-    # Statische Labels
     if state is None:
         return r"""
 digraph G {
@@ -171,35 +253,50 @@ digraph G {
   node [shape=box, style="rounded,filled", color="#9ca3af", fillcolor="#f9fafb", fontname="Inter"];
 
   input      [label="Input (raw text/PDF extract)"];
-  retriever  [label="Retriever/Preprocess - Analysis Context"];
+  retriever  [label="Retriever/Preprocess"];
   reader     [label="Reader - Notes"];
-  summarizer [label="Summarizer - Summary"];
+  summarizer [label="Summarizer"];
+  translator [label="Translator (DE/EN)"];
+  keyword    [label="Keyword Extraction"];
   critic_node [label="Critic - Review"];
   quality    [label="Quality (F1)"];
-  judge      [label="LLM Judge (0-5)"];
+  judge      [label="LLM Judge"];
+  aggregator [label="Judge Aggregator"];
   integrator [label="Integrator - Meta Summary"];
   output     [label="Output (notes, summary, critic, meta, f1, judge)"];
 
-  input -> retriever -> reader -> summarizer -> critic_node -> quality -> judge -> integrator -> output;
+  input -> retriever -> reader -> summarizer -> translator -> keyword -> critic_node;
+  critic_node -> quality [label="long summary"];
+  critic_node -> judge [label="short summary", style="dashed"];
+  critic_node -> summarizer [label="rework (low critic)", style="dotted"];
+  quality -> judge -> aggregator -> integrator -> output;
+  judge -> aggregator;
 }
 """.strip()
-    
-    # Dynamische Labels mit tatsächlichen Werten
+
     reader_time = state.get("reader_s", 0.0)
     summarizer_time = state.get("summarizer_s", 0.0)
     critic_time = state.get("critic_s", 0.0)
     integrator_time = state.get("integrator_s", 0.0)
+    translator_time = state.get("translator_s", 0.0)
+    keyword_time = state.get("keyword_s", 0.0)
     f1_score = state.get("quality_f1", 0.0)
     judge_score = state.get("judge_score", 0.0)
-    
-    # Formatierung für Labels
+    judge_aggregate = state.get("judge_aggregate", 0.0)
+    translation_preview = (state.get("summary_translated", "") or "").replace('"', "'")
+    translation_preview = translation_preview[:40] + ("…" if len(translation_preview) > 40 else "")
+    keywords_label = state.get("keywords", "") or "no keywords"
+    critic_label = f"Critic - Review\\n{critic_time:.2f}s"
+
     reader_label = f"Reader - Notes\\n{reader_time:.2f}s"
     summarizer_label = f"Summarizer - Summary\\n{summarizer_time:.2f}s"
-    critic_label = f"Critic - Review\\n{critic_time:.2f}s"
+    translator_label = f"Translator\\n{translation_preview}\\n{translator_time:.2f}s"
+    keyword_label = f"Keywords\\n{keywords_label}\\n{keyword_time:.2f}s"
     quality_label = f"Quality (F1)\\n{f1_score:.3f}"
     judge_label = f"LLM Judge\\n{judge_score:.1f}/5"
+    aggregator_label = f"Judge Aggregate\\n{judge_aggregate:.3f}"
     integrator_label = f"Integrator - Meta Summary\\n{integrator_time:.2f}s"
-    
+
     return f"""
 digraph G {{
   rankdir=LR;
@@ -210,13 +307,21 @@ digraph G {{
   retriever  [label="Retriever/Preprocess\\nAnalysis Context", fillcolor="#f0f4ff"];
   reader     [label="{reader_label}", fillcolor="#dbeafe"];
   summarizer [label="{summarizer_label}", fillcolor="#dbeafe"];
+  translator [label="{translator_label}", fillcolor="#fde68a"];
+  keyword    [label="{keyword_label}", fillcolor="#fef3c7"];
   critic_node [label="{critic_label}", fillcolor="#dbeafe"];
   quality    [label="{quality_label}", fillcolor="#d1fae5"];
-  judge      [label="{judge_label}", fillcolor="#d1fae5"];
+  judge      [label="{judge_label}", fillcolor="#c7d2fe"];
+  aggregator [label="{aggregator_label}", fillcolor="#c5fde2"];
   integrator [label="{integrator_label}", fillcolor="#dbeafe"];
   output     [label="Output\\n(all results)", fillcolor="#e0e7ff", color="#667eea"];
 
-  input -> retriever -> reader -> summarizer -> critic_node -> quality -> judge -> integrator -> output;
+  input -> retriever -> reader -> summarizer -> translator -> keyword -> critic_node;
+  critic_node -> quality [label="long summary", style="solid"];
+  critic_node -> judge [label="short summary", style="dashed"];
+  critic_node -> summarizer [label="rework (low critic)", style="dotted"];
+  quality -> judge -> aggregator -> integrator -> output;
+  judge -> aggregator;
 }}
 """.strip()
 
@@ -227,17 +332,23 @@ def _build_langgraph_workflow() -> Any:
     graph.add_node("retriever", _execute_retriever_node)
     graph.add_node("reader", _execute_reader_node)
     graph.add_node("summarizer", _execute_summarizer_node)
+    graph.add_node("translator", _execute_translator_node)
+    graph.add_node("keyword", _execute_keyword_node)
     graph.add_node("critic_node", _execute_critic_node)  # Umbenannt: Node-Name != State-Key
     graph.add_node("quality", _execute_quality_node)
     graph.add_node("judge", _execute_judge_node)
+    graph.add_node("aggregator", _execute_aggregator_node)
     graph.add_node("integrator", _execute_integrator_node)
     graph.set_entry_point("retriever")
     graph.add_edge("retriever", "reader")
     graph.add_edge("reader", "summarizer")
-    graph.add_edge("summarizer", "critic_node")  # Edge angepasst
-    graph.add_edge("critic_node", "quality")  # Edge angepasst
+    graph.add_edge("summarizer", "translator")
+    graph.add_edge("translator", "keyword")
+    graph.add_edge("keyword", "critic_node")
+    graph.add_conditional_edges("critic_node", _critic_post_path)
     graph.add_edge("quality", "judge")
-    graph.add_edge("judge", "integrator")
+    graph.add_edge("judge", "aggregator")
+    graph.add_edge("aggregator", "integrator")
     graph.add_edge("integrator", END)
     return graph.compile()
 
@@ -260,6 +371,13 @@ def run_pipeline(input_text: str, config: Optional[Dict[str, Any]] = None) -> Di
         "reader_s": 0.0,
         "summarizer_s": 0.0,
         "critic_s": 0.0,
+        "translator_s": 0.0,
+        "keyword_s": 0.0,
+        "summary_translated": "",
+        "keywords": "",
+        "judge_aggregate": 0.0,
+        "critic_score": 0.0,
+        "critic_loops": 0,
         "integrator_s": 0.0,
         "quality_f1": 0.0,
         "judge_score": 0.0,
@@ -280,22 +398,34 @@ def run_pipeline(input_text: str, config: Optional[Dict[str, Any]] = None) -> Di
         "reader_s": final_state.get("reader_s", 0.0),
         "summarizer_s": final_state.get("summarizer_s", 0.0),
         "critic_s": final_state.get("critic_s", 0.0),
+        "translator_s": final_state.get("translator_s", 0.0),
+        "keyword_s": final_state.get("keyword_s", 0.0),
         "integrator_s": final_state.get("integrator_s", 0.0),
         "quality_f1": final_state.get("quality_f1", 0.0),
         "judge_score": final_state.get("judge_score", 0.0),
+        "judge_aggregate": final_state.get("judge_aggregate", 0.0),
+        "critic_score": final_state.get("critic_score", 0.0),
+        "critic_loops": final_state.get("critic_loops", 0),
     })
     
     return {
         "structured": final_state.get("notes", ""),
         "summary": final_state.get("summary", ""),
+        "summary_translated": final_state.get("summary_translated", ""),
+        "keywords": final_state.get("keywords", ""),
         "critic": final_state.get("critic", ""),
         "meta": final_state.get("meta", ""),
         "reader_s": final_state.get("reader_s", 0.0),
         "summarizer_s": final_state.get("summarizer_s", 0.0),
         "critic_s": final_state.get("critic_s", 0.0),
+        "translator_s": final_state.get("translator_s", 0.0),
+        "keyword_s": final_state.get("keyword_s", 0.0),
         "integrator_s": final_state.get("integrator_s", 0.0),
         "quality_f1": final_state.get("quality_f1", 0.0),
         "judge_score": final_state.get("judge_score", 0.0),
+        "judge_aggregate": final_state.get("judge_aggregate", 0.0),
+        "critic_score": final_state.get("critic_score", 0.0),
+        "critic_loops": final_state.get("critic_loops", 0),
         "latency_s": total_duration,
         "input_chars": input_chars,
         "graph_dot": _generate_graph_visualization_dot(final_state),  # Dynamisch mit Werten

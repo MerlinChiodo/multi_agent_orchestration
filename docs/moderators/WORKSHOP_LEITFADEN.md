@@ -103,35 +103,31 @@ Kündige den Wechsel zu LangGraph an: Graph-basierte Orchestrierung als nächste
 
 #### Aufgabe 3.1: Graph-Pipeline ausführen und Code verstehen (4 Minuten)
 
-Teilnehmer führen die LangGraph-Pipeline aus und analysieren die Graph-Visualisierung. 
+Teilnehmer führen die LangGraph-Pipeline aus und analysieren die aktuelle Graph-Visualisierung.
 
-Dann öffnen sie `workflows/langgraph_pipeline.py` und schauen sich `_build_langgraph_workflow` an (Zeilen 186-204). Zeige ihnen, wie der Code den Graph explizit aufbaut mit `graph.add_node()` und `graph.add_edge()`.
+Dann öffnen sie `workflows/langgraph_pipeline.py` und schauen sich `_build_langgraph_workflow` an (Zeilen 186-210). Zeige ihnen, wie der Graph nun Translator-, Keyword- und Judge-Aggregator-Nodes enthält und wie Conditional Edges mit `_critic_post_path` die Reihenfolge dynamisch steuern.
 
-Demonstriere die Graph-Struktur live: "Input - Retriever - Reader - Summarizer - Critic - Quality - Judge - Integrator - Output. Die Graph-Visualisierung ist der entscheidende Unterschied zu LangChain. Und im Code seht ihr die explizite Struktur."
+Demonstriere die Graph-Struktur live: "Input - Retriever - Reader - Summarizer - Translator - Keyword - Critic → Quality/Judge (kurze Summary) bzw. zurück zum Summarizer bei schlechtem Critic Score - Judge Aggregator - Integrator - Output." Die Visualisierung macht die Zweige direkt sichtbar.
 
 Hinweis: Falls Teilnehmer die Graph-Visualisierung nicht sehen, weise darauf hin, dass sie nach unten scrollen müssen.
 
-#### Aufgabe 3.2: Neuen Node hinzufügen (6 Minuten)
+#### Aufgabe 3.2: Translator & Keyword Nodes erkunden (6 Minuten)
 
-Teilnehmer fügen einen neuen Node hinzu, z.B. einen Translator. 
+Diese Nodes existieren bereits und liefern zusätzliche Outputs (`summary_translated`, `keywords`). Zeige, wie `_execute_translator_node` gezielt eine deutsch-englische Kurzfassung mit Kürzungsstufen erzeugt und wie `_execute_keyword_node` häufige Begriffe extrahiert.
 
-Erkläre die Schritte:
-1. Neue Node-Funktion erstellen (basierend auf `_execute_summarizer_node`)
-2. Node zum Graph hinzufügen mit `graph.add_node()`
-3. Edges anpassen (alte Edge entfernen, neue hinzufügen)
-4. PipelineState erweitern (neues Feld für `summary_de`)
+Die Teilnehmer dürfen:
+1. Die Sprache bzw. den Stil im Translator ändern (z.B. `translator_language`, `translator_style` im Config-Dict).
+2. Die Keyword-Logik erweitern (z.B. Stopwords, mehr Keywords).
+3. Die zusätzlichen State-Felder auslesen (z.B. `summary_translated`, `keywords`) und in der App vergleichen.
 
-Unterstütze bei Problemen: Prüfe Syntax, zeige auf die richtigen Zeilen im Code. Falls es zu komplex wird, können Teilnehmer auch nur die Struktur verstehen, ohne vollständig zu implementieren.
+#### Aufgabe 3.3: Conditional Flow und Judge-Aggregator (5 Minuten)
 
-**Tipp für Teilnehmer:** Nutzt `_execute_summarizer_node` als Vorlage. Kopiert die Struktur und passt sie an.
+Zeige die neue Funktion `_critic_post_path`, die:
+- bei kurzen Summaries (`len(summary)<100`) direkt zu `judge` springt,
+- bei schlechtem Critic-Score (`<0.5`) den Summarizer noch einmal ausführt (Loop-Limit beachten),
+- ansonsten zu `quality`.
 
-#### Aufgabe 3.3: Conditional Edge (5 Minuten, optional für schnelle Teilnehmer)
-
-Schnellere Teilnehmer können versuchen, eine Conditional Edge hinzuzufügen. Das ist anspruchsvoll, aber zeigt die Mächtigkeit von LangGraph.
-
-Erkläre das Konzept: Conditional Edges ermöglichen Verzweigungen im Graph basierend auf Bedingungen. Zeige ein einfaches Beispiel: "Wenn Critic-Score schlecht, wiederhole Critic, sonst weiter zu Quality."
-
-Falls zu komplex: Erkläre nur das Konzept, ohne vollständige Implementierung.
+Betone, dass Judge und Aggregator jetzt explizit Nodes sind: `judge` liefert einen Wert 0-5, `aggregator` verrechnet Judge, Quality und Critic zu einem Gesamtwert. Teilnehmer können z.B. die Schwellenwerte verändern oder weitere Metriken ergänzen.
 
 #### Aufgabe 3.4: Unterschiede zwischen LangChain und LangGraph sehen (5 Minuten)
 
@@ -139,7 +135,7 @@ Teilnehmer vergleichen die Code-Dateien direkt. Öffnen beide Pipeline-Dateien n
 
 **LangChain** (`workflows/langchain_pipeline.py`, Zeilen 33-52): Einfache Funktionsaufrufe nacheinander, keine explizite Struktur, keine Fehlerbehandlung zwischen Schritten.
 
-**LangGraph** (`workflows/langgraph_pipeline.py`, Zeilen 186-204): Expliziter Graph, der Code verwaltet State explizit, jedes Node hat Timeout-Handling, der Code ermöglicht Conditional Edges.
+**LangGraph** (`workflows/langgraph_pipeline.py`, Zeilen 186-210): Expliziter Graph, der Code verwaltet State explizit, zusätzliche Nodes (Translator, Keyword, Aggregator) und Conditional Edges steuern den Flow.
 
 Erkläre: "Der Hauptunterschied ist, dass LangGraph die Struktur explizit macht. Ihr könnt diese sehen, modifizieren, erweitern."
 
@@ -169,7 +165,7 @@ Wichtig: Die Teilnehmer sehen, dass sich die Outputs ändern, auch wenn kein exp
 
 Schnellere Teilnehmer können versuchen, ein neues Feld zur Signature hinzuzufügen (z.B. TARGET_LENGTH).
 
-Hinweis: Falls eine Warnung erscheint, dass DSPy nicht installiert ist, erkläre, dass das ok ist. Die App nutzt einen Stub-Modus. Das Konzept ist wichtig.
+Hinweis: Falls eine Warnung erscheint, dass DSPy nicht installiert ist, erkläre, dass das ok ist. Die App nutzt einen Stub-Modus mit Dummy-Output und einer klaren `meta`-Nachricht, damit die Demo nicht abstürzt und die Teilnehmer trotzdem sehen, wie der Mechanismus funktioniert.
 
 #### Aufgabe 5.3: Teleprompting (5 Minuten)
 
@@ -177,13 +173,15 @@ Warnung vorab: "Achtung: Ausführung dauert 1-2 Minuten. Teleprompting optimiert
 
 Teilnehmer aktivieren "DSPy optimieren", prüfen den Dev-Set Pfad (`dev-set/dev.jsonl`) und klicken auf "DSPy Teleprompt Gain". 
 
+Ergänzend erwähnen: Das Dev-Set wurde auf 15 Beispiele erweitert, die verschiedene `target_length`-Tags (short/medium/long) und `prompt_focus`-Tags (Results/Method/Conclusion) enthalten. Dadurch sehen die Teilnehmer live, wie DSPy die Prompt-Strategie anpasst, welche Beispieltypen schneller trainieren und wo der Latenz-gegen-Qualität-Trade-off entsteht.
+
 Während der Wartezeit (2 Minuten) erkläre den Prozess: "DSPy testet verschiedene Prompts. Es nutzt das Dev-Set (Trainingsdaten mit Beispielen). Es evaluiert jeden Prompt gegen die Beispiele und wählt die optimale Variante. Dies ist Few-Shot-Bootstrapping - das System lernt aus Beispielen und optimiert sich selbst."
 
 Falls Code-Zugriff vorhanden: Zeige, wo Teleprompting konfiguriert ist. Suche nach "teleprompt" in `workflows/dspy_pipeline.py`. Erkläre, wie das Dev-Set verwendet wird.
 
 Wichtig: Nutze die Wartezeit produktiv. Erkläre, was passiert. Frage, ob Teilnehmer Fragen haben.
 
-Nach Teleprompting: "Analysiert die Vergleichstabelle. Wie viel besser ist Teleprompt?" Typischerweise: positiver F1 Gain, erhöhte Latenz (klassischer Trade-off). 
+Nach Teleprompting: "Analysiert die Vergleichstabelle. Wie viel besser ist Teleprompt?" Typischerweise: positiver F1 Gain, erhöhte Latenz (klassischer Trade-off). Die 15 Dev-Beispiele spiegeln unterschiedliche Ziel-Längen und Fokus-Schwerpunkte, sodass sichtbar wird, wie Teleprompting seine Prompts je nach Beispielart optimiert.
 
 Teilnehmer vergleichen Base vs. Teleprompt Outputs in den Tab-Reitern. Was ist besser? Meist: bessere Coverage, bessere Kohärenz.
 

@@ -56,22 +56,19 @@
 - LangGraph definiert Nodes und Edges in `app/workflows/langgraph_pipeline.py`
 - Ihr seht, wie Inputs, Reader, Summarizer, Critic und Integrator verknüpft sind
 
-### Aufgabe: Translator Node einfügen
-1. PipelineState um ein Feld `summary_de` erweitern
-2. Neue Funktion `_execute_translator_node`, die `summary` auf Deutsch simuliert
-3. Node zum Graph mit `graph.add_node("translator", ...)` hinzufügen
-4. Edges ändern:
-   - `graph.add_edge("summarizer", "translator")`
-   - `graph.add_edge("translator", "critic")`
-5. Graph starten und prüfen:
-   - Der neue Node sollte im Visual Tab auftauchen
-   - Die Ausgabe zeigt `summary_de`
+### Aufgabe: Translator- & Keyword-Nodes beobachten
+- Die Nodes existieren bereits. Schaut euch `_execute_translator_node` an: Erzeugt `state["summary_translated"]`, der sich durch `translator_language` und `translator_style` beeinflussen lässt.
+- Probiert unterschiedliche Einstellungen aus (z. B. `translator_style="ultra_short"` oder `translator_language="EN"`) und beobachtet die neuen Labels in der Visualisierung.
+- Der Keyword-Node (`_execute_keyword_node`) füllt `state["keywords"]` und zeigt die wichtigsten Begriffe. Ihr könnt z. B. die Token-Länge oder Anzahl ändern.
+- Wichtig: Die Ausgabe zeigt nun bereits `summary_translated` und `keywords`, ohne dass ihr etwas neu anschließt.
 
-### Aufgabe: Conditional Edge testen
-- Fügt eine Funktion `should_skip_quality(state)` hinzu (z. B. Summary kürzer als 100 Zeichen)
-- Ersetzt `graph.add_edge("critic", "quality")` durch `graph.add_conditional_edges("critic", should_skip_quality)`
-- Verbindet `quality` und `judge` weiterhin normal
-- Bei kurzen Summaries sollte der Graph direkt zu `judge` springen
+### Aufgabe: Conditional Flow & Judge-Aggregator
+- In `_critic_post_path` steckt die Logik, die entscheidet:
+  - Kurze Summaries (<100 Zeichen) springen zu `judge`,
+  - Schlechte Critic-Scores (<0.5) führen zur Loop zurück zum Summarizer (maximal `max_critic_loops`, Default 1),
+  - Sonst geht es zu `quality`.
+- Der Judge-Node liefert einen Score 0-5, `aggregator` verrechnet Judge, Quality und Critic zu `state["judge_aggregate"]`.
+- Versucht, Schwellenwerte oder `max_critic_loops` in `_config` anzupassen und beobachtet in der Visualisierung, wie sich die Zweige verändern.
 
 ## Teil 3: DSPy anpassen
 ### Signatures variieren
