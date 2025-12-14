@@ -1,17 +1,17 @@
 """
-LLM-Konfiguration für OpenAI (z. B. gpt-4.1).
+LLM configuration for OpenAI (e.g., gpt-4o-mini).
 """
 
 import os
 from typing import Optional
 from langchain_openai import ChatOpenAI
 
-# Lade .env Datei, falls vorhanden (muss vor configure() aufgerufen werden)
+# Try to load .env file when available
 try:
     from dotenv import load_dotenv
     load_dotenv()
 except ImportError:
-    pass  # python-dotenv nicht installiert, nutze Umgebungsvariablen
+    pass
 
 _llm_instance: Optional[ChatOpenAI] = None
 
@@ -24,13 +24,12 @@ def _create_openai_llm(
     request_timeout_seconds: int,
     api_key: Optional[str] = None,
 ) -> ChatOpenAI:
-    """Erstellt ChatOpenAI-Instanz mit gegebenen Parametern."""
-    # API Key aus Parameter oder Umgebungsvariable
+    """Return a configured ChatOpenAI instance."""
     api_key = api_key or os.getenv("OPENAI_API_KEY")
     if not api_key:
         raise ValueError(
-            "OPENAI_API_KEY muss gesetzt sein! "
-            "Bitte in .env Datei eintragen oder als Umgebungsvariable setzen."
+            "OPENAI_API_KEY must be set! "
+            "Please add it to .env file or set as environment variable."
         )
     
     return ChatOpenAI(
@@ -44,12 +43,7 @@ def _create_openai_llm(
 
 
 def configure(config: Optional[dict] = None) -> None:
-    """
-    Konfiguriert globale LLM-Instanz (OpenAI).
-    
-    Parameter-Quelle (Priorität): config - Umgebungsvariablen - Fallback.
-    Erwartet `OPENAI_API_KEY` in der Umgebung oder .env Datei.
-    """
+    """Set the global ChatOpenAI instance."""
     global _llm_instance
 
     config_dict = config or {}

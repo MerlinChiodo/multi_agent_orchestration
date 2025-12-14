@@ -18,7 +18,7 @@ from pypdf import PdfReader
 from workflows.langchain_pipeline import run_pipeline as run_lc
 from workflows.langgraph_pipeline import run_pipeline as run_lg
 from workflows.dspy_pipeline import run_pipeline as run_dspy, DSPY_READY
-from utils import build_analysis_context, detect_quantitative_signal, extract_confidence_line
+from utils import build_analysis_context, extract_confidence_line
 
 load_dotenv()
 st.set_page_config(
@@ -89,7 +89,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# === HEADER ===
+# Header
 st.title("Paper Analyzer")
 st.caption("Multi-Agent Orchestration with LangChain, LangGraph & DSPy")
 
@@ -100,7 +100,7 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# === SIDEBAR: SETTINGS ===
+# Sidebar settings
 with st.sidebar:
     st.markdown("### Settings")
     st.markdown("---")
@@ -164,7 +164,7 @@ with st.sidebar:
     
     show_debug = st.checkbox("Debug Mode", value=False, help="Show detailed error messages and stack traces when errors occur. Useful for troubleshooting.")
     
-    # === TELEMETRY ===
+    # Telemetry
     st.markdown("---")
     st.markdown("### Telemetry")
     
@@ -239,10 +239,10 @@ config = {
     "dspy_dev_path": dspy_dev_path,
 }
 
-# === MAIN TABS ===
+# Main tabs
 tab_analyse, tab_vergleich, tab_teleprompt = st.tabs(["Analysis", "Compare", "DSPy Optimization"])
 
-# === TAB 1: ANALYSIS ===
+# Tab 1: Analysis
 with tab_analyse:
     col_upload, col_pipeline = st.columns([2, 1])
     
@@ -353,66 +353,29 @@ with tab_analyse:
                         meta_len = len(pipeline_result.get("meta", "") or "")
                         st.metric("Meta Length", f"{meta_len:,} chars", help="Number of characters in the meta summary (final integrated summary)")
                     with col_meta4:
-                        f1 = pipeline_result.get("quality_f1", None)
-                        if f1 is not None:
-                            st.metric("F1 Score", f"{f1:.3f}", help="F1 score measures overlap between notes and summary. Higher is better (0-1 range). Only available for LangGraph.")
-                        else:
-                            st.metric("F1 Score", "N/A", help="F1 score is not available for this pipeline")
-
-                    if pipeline_mode == "LangGraph":
-                        col_extra1, col_extra2 = st.columns(2)
-                        with col_extra1:
-                            rouge_l = pipeline_result.get("quality_rougeL", None)
-                            if rouge_l is not None:
-                                st.metric("ROUGE-L", f"{rouge_l:.3f}", help="ROUGE-L measures longest-common-subsequence overlap between notes and summary (0-1).")
-                            else:
-                                st.metric("ROUGE-L", "N/A", help="ROUGE-L is not available for this pipeline")
-                        with col_extra2:
-                            loops = int(pipeline_result.get("critic_loops", 0) or 0)
-                            st.metric("Critic Loops", str(loops), help="How many times LangGraph routed back to the Summarizer due to low critic score.")
-
-                    quant_label = pipeline_result.get("quant_signal_label")
-                    if not quant_label:
-                        quant_info = detect_quantitative_signal(analysis_context)
-                        quant_label = quant_info.get("label")
-                    metrics_count = pipeline_result.get("extracted_metrics_count", None)
-                    recovery_used = pipeline_result.get("recovery_attempted", False)
-                    quant_trace = quant_label or "not evaluated"
-                    if metrics_count is not None:
-                        quant_trace = f"{quant_trace} (reader metrics: {metrics_count})"
-                    if recovery_used:
-                        quant_trace = quant_trace + " – recovery path used"
+                        loops = int(pipeline_result.get("critic_loops", 0) or 0)
+                        st.metric("Critic Loops", str(loops), help="How many times LangGraph routed back to the Summarizer due to low critic score (LangGraph only).")
 
                     execution_trace = pipeline_result.get("execution_trace", []) or []
                     trace_set = {str(x).lower() for x in execution_trace if x}
                     agent_lines = []
                     for key, label in (
                         ("reader", "Reader"),
-                        ("results_extractor", "Results Extractor"),
                         ("summarizer", "Summarizer"),
                         ("critic", "Critic"),
                         ("integrator", "Integrator"),
                     ):
-                        agent_lines.append(f"{'✅' if key in trace_set else '⬜'} {label}")
+                        status_text = "visited" if key in trace_set else "not visited"
+                        agent_lines.append(f"{label} - {status_text}")
 
                     with st.expander("Execution Trace", expanded=True):
                         st.markdown("\n".join(f"- {line}" for line in agent_lines))
-                        st.markdown(f"🔎 Quantitative signal: **{quant_trace}**")
                         if pipeline_mode == "LangGraph":
                             looped = "YES" if int(pipeline_result.get("critic_loops", 0) or 0) > 0 else "NO"
                             routing = pipeline_result.get("routing_trace", []) or []
                             branch = (routing[-1] if routing else "n/a").upper()
-                            st.markdown(f"🔁 LangGraph looped: **{looped}**")
-                            st.markdown(f"🧭 LangGraph branch: **{branch}**")
-                        translator_note = pipeline_result.get("translator_note") or ""
-                        if pipeline_result.get("summary_translated", "").startswith("Translator skipped"):
-                            translator_note = pipeline_result.get("summary_translated")
-                        if translator_note:
-                            st.markdown(f"🌐 {translator_note}")
-                        keyword_note = pipeline_result.get("keyword_note") or ""
-                        if keyword_note or (pipeline_result.get("keywords", "").startswith("Keywords: none")):
-                            keyword_msg = pipeline_result.get("keywords") if pipeline_result.get("keywords") else "Keywords: none (fallback used)"
-                            st.markdown(f"🏷️ {keyword_msg}")
+                            st.markdown(f"LangGraph looped: **{looped}**")
+                            st.markdown(f"LangGraph branch: **{branch}**")
                     
                     # Meta Summary
                     if pipeline_result.get("meta"):
@@ -477,7 +440,7 @@ with tab_analyse:
                 if show_debug:
                     st.exception(e)
 
-# === TAB 2: COMPARE ===
+# Tab 2: Compare
 with tab_vergleich:
     st.markdown("### Compare All Pipelines")
     st.info("Run all three pipelines on the same document to compare results.")
@@ -607,7 +570,7 @@ with tab_vergleich:
                     with st.expander("Critic"):
                         st.text(res.get("critic", ""))
 
-# === TAB 3: DSPY TELEPROMPT ===
+# Tab 3: DSPy Teleprompt
 with tab_teleprompt:
     st.markdown("### DSPy Teleprompting: Base vs. Optimized")
     st.info("Compare DSPy without and with Teleprompting optimization. Enable Teleprompting in Settings and provide a dev set path.")

@@ -1,5 +1,5 @@
 """
-LangChain Pipeline: Sequenzielle Ausführung der Multi-Agent-Pipeline.
+LangChain Pipeline: Sequential execution.
 """
 
 from typing import Optional, Dict, Any
@@ -13,7 +13,6 @@ from telemetry import log_row
 from llm import configure
 from utils import (
     build_analysis_context,
-    detect_quantitative_signal,
     count_numeric_results,
     extract_confidence_line,
 )
@@ -21,9 +20,11 @@ from utils import (
 
 def run_pipeline(input_text: str, config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """
-    Führt LangChain-Pipeline sequenziell aus: Reader - Summarizer - Critic - Integrator.
+    Runs LangChain pipeline sequentially.
     
-    Gibt Dictionary zurück mit: structured, summary, critic, meta, Timing-Infos und Gesamt-Latenz.
+    Simple linear flow: reader -> summarizer -> critic -> integrator.
+    No conditional routing or loops. We considered error recovery between steps.
+    We kept it minimal to show the base pattern.
     """
     config_dict = config or {}
     configure(config_dict)
@@ -42,7 +43,6 @@ def run_pipeline(input_text: str, config: Optional[Dict[str, Any]] = None) -> Di
     end_time_reader = perf_counter()
     reader_duration = round(end_time_reader - start_time_reader, 2)
     metrics_count = count_numeric_results(structured_notes)
-    quant_info = detect_quantitative_signal(analysis_context)
     
     start_time_summarizer = perf_counter()
     execution_trace.append("summarizer")
@@ -80,12 +80,10 @@ def run_pipeline(input_text: str, config: Optional[Dict[str, Any]] = None) -> Di
         "meta_len": len(str(meta_summary)),
         "latency_s": total_duration,
         **timing_statistics,
-        "quant_signal": quant_info.get("signal", ""),
         "extracted_metrics_count": metrics_count,
         "confidence": confidence_line,
     })
     
-    # Ergebnis zusammenstellen
     return {
         "structured": structured_notes,
         "summary": summary,
@@ -95,17 +93,13 @@ def run_pipeline(input_text: str, config: Optional[Dict[str, Any]] = None) -> Di
         "input_chars": input_chars,
         **timing_statistics,
         "execution_trace": execution_trace,
-        "quant_signal": quant_info.get("signal", ""),
-        "quant_signal_label": quant_info.get("label", ""),
-        "quant_keyword_hits": quant_info.get("keyword_hits", []),
-        "quant_number_samples": quant_info.get("number_samples", []),
         "extracted_metrics_count": metrics_count,
         "confidence": confidence_line or "",
     }
 
 
 def _create_error_response(error_message: str) -> Dict[str, Any]:
-    """Erstellt standardisierte Fehlerantwort."""
+    """Creates error response."""
     return {
         "structured": "[Input empty or too short]",
         "summary": "",

@@ -1,5 +1,5 @@
 """
-Reader-Agent: Extrahiert strukturierte Notizen aus Papern.
+Reader Agent: Extracts structured notes from papers.
 """
 
 from __future__ import annotations
@@ -49,12 +49,12 @@ READER_PROMPT = ChatPromptTemplate.from_template(
 
 
 def _clean_output_text(raw_output: str) -> str:
-    """Entfernt Leerzeichen am Anfang/Ende."""
+    """Removes leading/trailing whitespace."""
     return (raw_output or "").strip()
 
 
 def run(input_text: str) -> str:
-    """Extrahiert strukturierte Notizen aus Paper-Text."""
+    """Extracts structured notes from paper text."""
     prompt_chain = READER_PROMPT | llm
     llm_response = prompt_chain.invoke({"content": input_text})
     output_text = getattr(llm_response, "content", llm_response)

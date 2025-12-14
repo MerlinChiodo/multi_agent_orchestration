@@ -1,17 +1,15 @@
 """
-Hilfsfunktionen für Text-Verarbeitung und Abschnitts-Erkennung.
+Helper functions for text processing and section detection.
 """
 
 from __future__ import annotations
 import re
 from typing import Dict, List, Tuple, Optional
 
-# ============================================================================
-# Basis-Text-Verarbeitung
-# ============================================================================
+# Basic text helpers
 
 def _normalize_text(raw_text: str) -> str:
-    """Behebt typische PDF-Probleme: getrennte Wörter, überflüssige Leerzeichen, Leerzeilen."""
+    """Fix PDF formatting issues."""
     if not raw_text:
         return ""
     
@@ -26,7 +24,7 @@ def _normalize_text(raw_text: str) -> str:
 
 
 def truncate_text(text: str, max_characters: Optional[int]) -> str:
-    """Kürzt Text auf max_characters (None = kein Limit)."""
+    """Truncate text to max_characters."""
     if not text or not max_characters:
         return text or ""
     
@@ -36,16 +34,14 @@ def truncate_text(text: str, max_characters: Optional[int]) -> str:
     return text[:max_characters]
 
 
-# ============================================================================
-# Metadaten und Boilerplate entfernen
-# ============================================================================
+# Remove metadata and boilerplate
 
-# Pattern für typische Metadaten-Keywords (Unis, Autoren, etc.)
+# Pattern for metadata keywords
 _METADATA_KEYWORDS_PATTERN = r"(?:university|institute|faculty|department|school of|affiliation|corresponding author|preprint|arxiv|doi|copyright|acknowledg(e)?ments?)"
 
 
 def strip_meta_head(raw_text: str) -> str:
-    """Entfernt Metadaten am Anfang (Autoren, Affiliations, Copyright, etc.), behält aber Abstract."""
+    """Drop metadata header and keep the abstract."""
     if not raw_text:
         return ""
     
@@ -85,7 +81,7 @@ def strip_meta_head(raw_text: str) -> str:
 
 
 def strip_references_tail(raw_text: str) -> str:
-    """Entfernt Literaturverzeichnis am Ende (nur wenn Header nicht zu früh kommt)."""
+    """Drop the bibliography section."""
     if not raw_text:
         return ""
     
@@ -99,9 +95,7 @@ def strip_references_tail(raw_text: str) -> str:
     return raw_text
 
 
-# ============================================================================
-# Abschnitts-Erkennung
-# ============================================================================
+# Section detection
 
 _SECTION_PATTERNS: List[Tuple[str, str]] = [
     ("abstract",     r"\babstract\b"),
@@ -125,7 +119,7 @@ _NUMERIC_HEADING_PATTERN = (
 
 
 def split_sections(text: str) -> Dict[str, str]:
-    """Findet Abschnitte durch Keywords und nummerierte Überschriften. Fallback: {"body": text}."""
+    """Find paper sections by keywords and numbered headings."""
     if not text:
         return {}
     
@@ -161,7 +155,7 @@ def split_sections(text: str) -> Dict[str, str]:
 
 
 def _normalize_section_name(detected_name: str) -> str:
-    """Normalisiert Abschnittsnamen (z.B. 'conclusions' zu 'conclusion', 'methodology' zu 'methods')."""
+    """Normalize section names, e.g. 'conclusions' to 'conclusion'."""
     detected_lower = detected_name.lower()
     
     if "conclusion" in detected_lower:
@@ -183,7 +177,13 @@ def _select_sections(
     preferred_section_names: List[str],
     character_budget: int
 ) -> Tuple[str, Dict[str, int]]:
-    """Wählt bevorzugte Abschnitte bis Budget voll, dann weitere nach Länge. Gibt (text, {section: chars}) zurück."""
+    """
+    Pick sections within the character budget.
+    
+    Prefer abstract, methods, and results first.
+    Add other sections by length when room remains.
+    If no sections appear, use long paragraphs from the body.
+    """
     if not detected_sections:
         return "", {}
     
@@ -247,14 +247,13 @@ def _select_sections(
     return combined_text, usage_statistics
 
 
-# ============================================================================
-# Öffentliche API
-# ============================================================================
+# Public API
 
 def build_analysis_context(raw_text: str, config: dict) -> str:
     """
-    Bereitet Text für Analyse vor: normalisiert, entfernt Metadaten/References.
-    Kein automatisches Trunkieren mehr; vollständiger Text wird zurückgegeben.
+    Prepare text for analysis.
+
+    Normalize PDF formatting. Drop metadata and references.
     """
     cleaned_text = _normalize_text(raw_text or "")
     cleaned_text = strip_meta_head(cleaned_text)
@@ -262,30 +261,7 @@ def build_analysis_context(raw_text: str, config: dict) -> str:
     return cleaned_text
 
 
-def preview_sections(raw_text: str, config: dict) -> Dict[str, int]:
-    """Zeigt Vorschau welche Abschnitte genutzt würden: {section: chars}."""
-    sections_enabled = bool(config.get("sections_enabled", True))
-    section_budget = int(config.get("section_budget_chars", config.get("truncate_chars", 2400)))
-    preferred_sections = config.get("sections_preferred") or [
-        "abstract", "introduction", "methods", "results", "discussion", "conclusion"
-    ]
-    
-    cleaned_text = _normalize_text(raw_text)
-    cleaned_text = strip_meta_head(cleaned_text)
-    cleaned_text = strip_references_tail(cleaned_text)
-    
-    if not sections_enabled:
-        return {"body": min(len(cleaned_text), section_budget)}
-    
-    detected_sections = split_sections(cleaned_text)
-    _, usage_statistics = _select_sections(detected_sections, preferred_sections, section_budget)
-    
-    return usage_statistics
-
-
-# ============================================================================
-# Quantitative Signal Detection & Confidence Parsing
-# ============================================================================
+# Quantitative signal detection and confidence parsing
 
 _METRIC_KEYWORDS = [
     "table", "%", "p=", "p<", "±", "≈",
@@ -294,7 +270,7 @@ _METRIC_KEYWORDS = [
 
 
 def _is_plausible_metric_number(number_text: str) -> bool:
-    """Heuristik: filtert offensichtliche Jahreszahlen/Seitenzahlen heraus."""
+    """Filter out obvious years or page numbers."""
     cleaned = re.sub(r"[^\d]", "", number_text or "")
     if not cleaned:
         return False
@@ -304,15 +280,7 @@ def _is_plausible_metric_number(number_text: str) -> bool:
 
 
 def detect_quantitative_signal(text: str) -> Dict[str, object]:
-    """
-    Heuristisch erkennen, ob der INPUT TEXT quantitative Metriken enthalten könnte.
-    
-    Returns dict with:
-    - signal: "YES" | "MAYBE" | "NO"
-    - label: human readable label
-    - keyword_hits: list of matched keywords
-    - number_samples: list of numeric snippets
-    """
+    """Detects if text contains quantitative metrics."""
     if not text or not text.strip():
         return {"signal": "NO", "label": "NO (no quantitative signal detected)", "keyword_hits": [], "number_samples": []}
     
@@ -361,7 +329,7 @@ def detect_quantitative_signal(text: str) -> Dict[str, object]:
 
 
 def _extract_results_block(notes_text: str) -> str:
-    """Extrahiert den Results-Block aus Notes (beste Schätzung, fallback = kompletter Text)."""
+    """Extracts Results block from notes."""
     if not notes_text:
         return ""
     match = re.search(r"Results:\s*(.*?)(?:\n[A-Z][A-Za-z/ ]+:|\Z)", notes_text, flags=re.S)
@@ -371,7 +339,7 @@ def _extract_results_block(notes_text: str) -> str:
 
 
 def count_numeric_results(notes_text: str) -> int:
-    """Zählt Zeilen im Results-Block, die plausible metrische Zahlen enthalten."""
+    """Counts numeric results in notes."""
     results_block = _extract_results_block(notes_text)
     if not results_block:
         return 0
@@ -386,7 +354,7 @@ def count_numeric_results(notes_text: str) -> int:
 
 
 def extract_confidence_line(meta_text: str) -> str:
-    """Parst eine Confidence-Zeile aus der Meta Summary."""
+    """Extracts confidence line from meta summary."""
     if not meta_text:
         return ""
     match = re.search(r"Confidence\s*:\s*([^\n]+)", meta_text, re.I)

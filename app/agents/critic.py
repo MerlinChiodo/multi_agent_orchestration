@@ -1,5 +1,5 @@
 """
-Critic-Agent: Bewertet Zusammenfassungen gegen Original-Notizen.
+Critic Agent: Evaluates summaries against original notes.
 """
 
 from __future__ import annotations
@@ -34,13 +34,13 @@ CRITIC_PROMPT = ChatPromptTemplate.from_template(
 
 
 def _clean_output_text(raw_output: str) -> str:
-    """Entfernt Leerzeichen am Anfang/Ende."""
+    """Removes leading/trailing whitespace."""
     return (raw_output or "").strip()
 
 
 def run(notes: str = "", summary: str = "", *args, **kwargs) -> Dict[str, Any]:
-    """Bewertet Zusammenfassung gegen Original-Notizen."""
-    # Rückwärtskompatibilität
+    """Evaluate summary against original notes."""
+    # Keep backward compatibility
     if args and not kwargs:
         notes_text = args[0]
         summary_text = args[0]

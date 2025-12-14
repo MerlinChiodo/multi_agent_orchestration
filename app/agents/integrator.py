@@ -1,5 +1,5 @@
 """
-Integrator-Agent: Erstellt finale Meta-Zusammenfassung aus allen vorherigen Schritten.
+Integrator Agent: Creates final meta-summary from all previous steps.
 """
 
 from __future__ import annotations
@@ -25,13 +25,13 @@ INTEGRATOR_PROMPT = ChatPromptTemplate.from_template(
 
 
 def _clean_output_text(raw_output: str) -> str:
-    """Entfernt Leerzeichen am Anfang/Ende."""
+    """Removes leading/trailing whitespace."""
     return (raw_output or "").strip()
 
 
 def run(notes: str = "", summary: str = "", critic: str = "", *args, **kwargs) -> str:
-    """Erstellt finale Meta-Zusammenfassung aus Notizen, Summary und Critic."""
-    # Rückwärtskompatibilität
+    """Creates final meta-summary from notes, summary, and critic."""
+    # Backward compatibility
     if args and not kwargs:
         notes_text = args[0]
         summary_text = args[0]

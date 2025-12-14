@@ -5,16 +5,16 @@ from typing import Dict, Any, List, Optional, Tuple
 from time import perf_counter
 import json, os, re
 
-from utils import detect_quantitative_signal, count_numeric_results, extract_confidence_line
+from utils import count_numeric_results, extract_confidence_line
 
-# Optional: unsere bestehende CSV-Telemetrie nutzen
+# Use CSV telemetry
 try:
     from telemetry import log_row
 except Exception:
-    def log_row(_row: dict):  # no-op fallback
+    def log_row(_row: dict):
         pass
 
-# --- Abhängigkeiten behutsam importieren ---
+# Import dependencies
 try:
     import dspy
     HAVE_DSPY = True
@@ -22,7 +22,7 @@ except Exception:
     HAVE_DSPY = False
 
 try:
-    import litellm  # noqa: F401  (wird indirekt von dspy genutzt)
+    import litellm  # noqa: F401
     HAVE_LITELLM = True
 except Exception:
     HAVE_LITELLM = False
@@ -48,15 +48,13 @@ def _lean_fallback(msg: str) -> Dict[str, Any]:
 
 
 if not DSPY_READY:
-    # Stub, damit die App nicht crasht wenn Pakete fehlen
     def run_pipeline(input_text: str, cfg: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         why = "missing 'dspy-ai'" if not HAVE_DSPY else "missing 'litellm'"
         return _lean_fallback(f"install dspy-ai and litellm to enable DSPy ({why}).")
 else:
-    # ---------------- DSPy: Konfiguration & Module ----------------
-
-    # Provider-Fix: LiteLLM erwartet "ollama/<model>"
+    # DSPy configuration
     def _configure_dspy(cfg: Optional[Dict[str, Any]] = None):
+        """Configures DSPy language model. Uses LiteLLM for provider abstraction."""
         cfg = cfg or {}
         model = cfg.get("model", "gpt-4.1")
         base = cfg.get("api_base") or os.getenv("OPENAI_BASE_URL")
@@ -73,13 +71,14 @@ else:
         )
         dspy.settings.configure(lm=lm)
 
-    # Sanitizer: keine JSON-Fragmente, keine Mehrfach-Leerzeilen
+    # Sanitize output
     def _sanitize(s: str) -> str:
+        """Removes JSON fragments and excessive blank lines from LLM output."""
         s = re.sub(r"^\s*[{[]\s*|\s*[}\]]\s*$", "", s or "", flags=re.S)
         s = re.sub(r"\n{3,}", "\n\n", s)
         return s.strip()
 
-    # ---------------- Signatures ----------------
+    # Signatures
     class ReadNotes(dspy.Signature):
         """Extract structured scientific notes from TEXT. Work ONLY with the provided TEXT.
         If an item is not explicitly stated, write 'not reported'. Do NOT invent facts.
@@ -144,15 +143,14 @@ else:
         CRITIC: str = dspy.InputField(desc="Critique feedback with rubric scores")
         META: str = dspy.OutputField(desc="Executive meta-summary with objective, method, results, limitations, takeaways, open questions, and confidence")
 
-    # ---------------- Module (deklarativ - DSPy generiert Prompts aus Signatures) ----------------
+    # Modules
     class ReaderM(dspy.Module):
-        """Reader module that extracts structured notes from text using declarative signatures."""
+        """Reader module using declarative signature."""
         def __init__(self):
             super().__init__()
             self.gen = dspy.Predict(ReadNotes)
 
         def forward(self, text: str):
-            # Deklarativ: Direkt die Signature nutzen, DSPy generiert den Prompt automatisch
             out = self.gen(TEXT=text)
             return dspy.Prediction(NOTES=_sanitize(out.NOTES))
 
@@ -163,8 +161,6 @@ else:
             self.gen = dspy.Predict(Summarize)
 
         def forward(self, notes: str = None, NOTES: str = None):
-            # Deklarativ: Direkt die Signature nutzen, DSPy generiert den Prompt automatisch
-            # Unterstützt sowohl 'notes' als auch 'NOTES' für Kompatibilität mit DSPy Teleprompting
             input_notes = NOTES if NOTES is not None else notes
             if input_notes is None:
                 raise ValueError("Either 'notes' or 'NOTES' must be provided")
@@ -178,7 +174,6 @@ else:
             self.gen = dspy.Predict(Critique)
 
         def forward(self, notes: str, summary: str):
-            # Deklarativ: Direkt die Signature nutzen, DSPy generiert den Prompt automatisch
             out = self.gen(NOTES=notes, SUMMARY=summary)
             return dspy.Prediction(CRITIC=_sanitize(out.CRITIC))
 
@@ -189,11 +184,10 @@ else:
             self.gen = dspy.Predict(Integrate)
 
         def forward(self, notes: str, summary: str, critic: str):
-            # Deklarativ: Direkt die Signature nutzen, DSPy generiert den Prompt automatisch
             out = self.gen(NOTES=notes, SUMMARY=summary, CRITIC=critic)
             return dspy.Prediction(META=_sanitize(out.META))
 
-    # ---------------- Pipeline (optional Teleprompting) ----------------
+    # Pipeline
     class PaperPipeline(dspy.Module):
         def __init__(self):
             super().__init__()
@@ -206,7 +200,6 @@ else:
             t0 = perf_counter()
             notes = self.reader(input_text).NOTES
             t1 = perf_counter()
-            # Verwende NOTES= für Kompatibilität mit Teleprompting
             summary = self.summarizer(NOTES=notes).SUMMARY
             t2 = perf_counter()
             critic = self.critic(notes, summary).CRITIC
@@ -223,12 +216,7 @@ else:
                 total_s=round(t4 - t0, 2),
             )
 
-    # -------- Optional: leichtgewichtiges Teleprompting (Bootstrap FS) --------
-    #
-    # Du kannst kleine Dev-Beispiele in dev-set/dev.jsonl (freiwillig) ablegen:
-    # Jede Zeile: {"text": "...", "target_summary": "..."}
-    #
-    # Wir nehmen eine sehr einfache Overlap-Metrik (keine externen Pakete).
+    # Optional teleprompting
     def _word_f1(pred: str, gold: str) -> float:
         ps = set(w.lower() for w in re.findall(r"\w+", pred))
         gs = set(w.lower() for w in re.findall(r"\w+", gold))
@@ -260,17 +248,23 @@ else:
         return examples
 
     def _teleprompt_if_requested(pipeline: PaperPipeline, cfg: Dict[str, Any]):
-        # aktiviere mit cfg["dspy_teleprompt"]=True
+        """
+        Optimizes DSPy pipeline using BootstrapFewShot.
+        
+        Instead of tuning prompts manually, we provide examples. DSPy finds
+        better strategies. BootstrapFewShot tries different few-shot combinations.
+        It picks the best by word F1. We only optimize summarizer as example.
+        We tried optimizing all modules. Summarizer has biggest impact. Full
+        optimization is too slow for interactive use.
+        """
         if not cfg.get("dspy_teleprompt"):
             return
         dev_path = cfg.get("dspy_dev_path", "dev-set/dev.jsonl")
         dev = _load_devset(dev_path)
         if not dev:
-            return  # nichts zu tun
+            return
 
-        # Metrik-Funktion: pred ist ein Prediction-Objekt mit .SUMMARY Attribut
         def _metric(gold, pred, trace=None):
-            # Extrahiere SUMMARY aus Prediction-Objekt
             pred_text = ""
             if hasattr(pred, "SUMMARY"):
                 pred_text = str(pred.SUMMARY)
@@ -281,15 +275,11 @@ else:
             gold_text = str(gold) if gold else ""
             return _word_f1(pred_text, gold_text)
 
-        # sehr kleine BootstrapFewShot-Optimierung
         tp = dspy.teleprompt.BootstrapFewShot(
             metric=_metric,
             max_bootstrapped_demos=3,
             max_labeled_demos=3,
         )
-
-        # Wir optimieren hier nur die Summarizer-Stage (als Beispiel)
-        # Trainset: Liste von dspy.Example oder Dict mit NOTES und SUMMARY
         trainset = []
         note_gold_pairs: List[Tuple[str, str]] = []
         target_lengths: set[str] = set()
@@ -314,8 +304,6 @@ else:
             return sum(scores) / len(scores) if scores else 0.0
 
         base_score = _score_module(pipeline.summarizer)
-
-        # compile() gibt eine optimierte Version zurück - diese muss verwendet werden!
         optimized_summarizer = tp.compile(pipeline.summarizer, trainset=trainset)
         pipeline.summarizer = optimized_summarizer
 
@@ -340,7 +328,7 @@ else:
         }
 
 
-    # ---------------- Public API ----------------
+    # Public API
     def run_pipeline(input_text: str, cfg: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         cfg = cfg or {}
         _configure_dspy(cfg)
@@ -351,7 +339,6 @@ else:
         t0 = perf_counter()
         out = pipe(input_text=input_text)
         t1 = perf_counter()
-        quant_info = detect_quantitative_signal(input_text)
         metrics_count = count_numeric_results(out.NOTES)
         confidence_line = extract_confidence_line(out.META)
 
@@ -366,13 +353,9 @@ else:
             "integrator_s": out.integrator_s,
             "latency_s": round(t1 - t0, 2),
             "input_chars": len(input_text or ""),
-            "graph_dot": None,  # nur LangGraph
+            "graph_dot": None,
             "dspy_available": True,
             "execution_trace": ["reader", "summarizer", "critic", "integrator"],
-            "quant_signal": quant_info.get("signal", ""),
-            "quant_signal_label": quant_info.get("label", ""),
-            "quant_keyword_hits": quant_info.get("keyword_hits", []),
-            "quant_number_samples": quant_info.get("number_samples", []),
             "extracted_metrics_count": metrics_count,
             "confidence": confidence_line,
         }
@@ -389,7 +372,6 @@ else:
             })
             result["meta"] = result["meta"] + "\n\n" + teleprompt_info["summary"]
 
-        # Telemetrie-CSV (so wie bei LangChain)
         try:
             log_row({
                 "engine": "dspy",
@@ -401,7 +383,6 @@ else:
                 "summarizer_s": result["summarizer_s"],
                 "critic_s": result["critic_s"],
                 "integrator_s": result["integrator_s"],
-                "quant_signal": result.get("quant_signal", ""),
                 "extracted_metrics_count": metrics_count,
                 "confidence": confidence_line,
             })
