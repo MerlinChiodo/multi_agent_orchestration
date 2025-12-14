@@ -137,45 +137,45 @@ with st.sidebar:
         help="gpt-4o-mini: Faster and cheaper, good for most tasks\n\ngpt-4o: More capable but slower and more expensive",
     )
     
-    max_tokens = st.slider(
-        "Max Tokens",
-        64, 1024, default_max_tokens, 32,
-        help="Maximum number of tokens the model can generate per step. Higher = longer responses but slower and more expensive. Typical range: 160-400.",
-    )
-    
-    temperature = st.slider(
-        "Temperature",
-        0.0, 1.0, default_temperature, 0.05,
-        help="Controls randomness in responses:\n\n0.0 = Deterministic, same input always gives same output\n0.1-0.3 = Slightly creative, good for structured tasks\n0.7-1.0 = Very creative, more variation",
-    )
-    
-    st.markdown("#### DSPy Optimization")
-    
-    use_dspy_teleprompt = st.checkbox(
-        "Enable Teleprompting",
-        value=False,
-        help="DSPy Teleprompting automatically optimizes prompts using examples from a dev set. It uses BootstrapFewShot to find better prompt examples. Requires a JSONL file with input-output pairs.",
-    )
-    
-    if use_dspy_teleprompt:
-        dspy_dev_path = st.text_input(
-            "Dev-Set Path",
-            value="dev-set/dev.jsonl",
-            help="Path to JSONL file containing training examples. Each line must be a JSON object with input text and expected summary. The system uses this file for prompt optimization.",
+    with st.expander("Advanced"):
+        max_tokens = st.slider(
+            "Max Tokens",
+            64, 1024, default_max_tokens, 32,
+            help="Maximum number of tokens the model can generate per step. Higher = longer responses but slower and more expensive. Typical range: 160-400.",
         )
-        if not os.path.exists(dspy_dev_path):
-            st.warning(f"File not found: {dspy_dev_path}")
+        
+        temperature = st.slider(
+            "Temperature",
+            0.0, 1.0, default_temperature, 0.05,
+            help="Controls randomness in responses:\n\n0.0 = Deterministic, same input always gives same output\n0.1-0.3 = Slightly creative, good for structured tasks\n0.7-1.0 = Very creative, more variation",
+        )
+    
+    # DSPy settings - show if DSPy is available (since we can't check active tab here)
+    if DSPY_READY:
+        with st.expander("DSPy"):
+            use_dspy_teleprompt = st.checkbox(
+                "Enable Teleprompting",
+                value=False,
+                help="DSPy Teleprompting automatically optimizes prompts using examples from a dev set. It uses BootstrapFewShot to find better prompt examples. Requires a JSONL file with input-output pairs.",
+            )
+            
+            if use_dspy_teleprompt:
+                dspy_dev_path = st.text_input(
+                    "Dev-Set Path",
+                    value="dev-set/dev.jsonl",
+                    help="Path to JSONL file containing training examples. Each line must be a JSON object with input text and expected summary. The system uses this file for prompt optimization.",
+                )
+                if not os.path.exists(dspy_dev_path):
+                    st.warning(f"File not found: {dspy_dev_path}")
+            else:
+                dspy_dev_path = "dev-set/dev.jsonl"
+            
+            show_debug = st.checkbox("Debug Mode", value=False, help="Show detailed error messages and stack traces when errors occur. Useful for troubleshooting.")
     else:
+        # DSPy not available - set defaults
+        use_dspy_teleprompt = False
         dspy_dev_path = "dev-set/dev.jsonl"
-    
-    show_debug = st.checkbox("Debug Mode", value=False, help="Show detailed error messages and stack traces when errors occur. Useful for troubleshooting.")
-    
-    st.markdown("#### LangGraph Settings")
-    max_critic_loops = st.slider(
-        "Max Critic Loops",
-        1, 5, 2,
-        help="Maximum number of times LangGraph can loop back from Critic to Summarizer if quality is low. 2-3 is usually optimal: allows self-correction without excessive retries."
-    )
+        show_debug = False
 
 # Config
 config = {
@@ -188,7 +188,7 @@ config = {
     "dspy_teleprompt": use_dspy_teleprompt,
     "dspy_dev_path": dspy_dev_path,
     "csv_telemetry": True,  # Always enabled, shown in expander below
-    "max_critic_loops": max_critic_loops,
+    "max_critic_loops": 2,  # Default value for LangGraph (not in sidebar anymore)
 }
 
 # Main tabs

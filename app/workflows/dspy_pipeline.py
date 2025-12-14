@@ -343,6 +343,12 @@ else:
         metrics_count = count_numeric_results(out.NOTES)
         confidence_line = extract_confidence_line(out.META)
 
+        # Use the sum of individual timings as latency, or fallback to measured time
+        calculated_latency = (out.reader_s + out.summarizer_s + out.critic_s + out.integrator_s)
+        measured_latency = round(t1 - t0, 2)
+        # Use the larger of the two to ensure we capture all processing time
+        final_latency = max(calculated_latency, measured_latency)
+
         result = {
             "structured": out.NOTES,
             "summary": out.SUMMARY,
@@ -352,7 +358,7 @@ else:
             "summarizer_s": out.summarizer_s,
             "critic_s": out.critic_s,
             "integrator_s": out.integrator_s,
-            "latency_s": round(t1 - t0, 2),
+            "latency_s": round(final_latency, 2),
             "input_chars": len(input_text or ""),
             "graph_dot": None,
             "dspy_available": True,
