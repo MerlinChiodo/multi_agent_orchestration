@@ -1,7 +1,7 @@
 #!/bin/bash
 # Multi-Agent Orchestration - Runner (macOS/Linux)
 
-# Wechsle ins Projekt-Root (Startskripte liegen nun in launchers/)
+# Wechsle ins Projekt-Root (Startskripte liegen nun in scripts/launchers/)
 cd "$(dirname "$0")/.."
 
 echo "========================================"
@@ -19,6 +19,16 @@ if ! command -v python3 &> /dev/null; then
     PYTHON_CMD=python
 else
     PYTHON_CMD=python3
+fi
+
+# Stelle sicher, dass Python 3.9+ ist
+if ! $PYTHON_CMD - <<'PY'
+import sys
+sys.exit(0 if (sys.version_info >= (3, 9)) else 1)
+PY
+then
+    echo "FEHLER: Python 3.9+ benötigt (gefunden: $($PYTHON_CMD --version 2>&1))"
+    exit 1
 fi
 
 # Aktiviere das virtuelle Environment

@@ -4,7 +4,7 @@
 
 Ihr seid in `docs/participants/`. Für den Start müsst ihr ins Projekt Root.
 
-**Einfachste Methode:** Start per Doppelklick auf `launchers/run.bat` (Windows) oder `launchers/run.sh` (Mac/Linux).
+**Einfachste Methode:** Start per Doppelklick auf `scripts/launchers/run.bat` (Windows) oder `scripts/launchers/run.sh` (Mac/Linux).
 
 ---
 
@@ -36,7 +36,7 @@ API Keys bekommt ihr vom Workshop Team oder auf https://platform.openai.com/api-
 
 ## Funktionstest
 
-- Doppelklick auf `launchers/run.*` öffnen das Terminal.
+- Doppelklick auf `scripts/launchers/run.*` öffnen das Terminal.
 - Meldung „App startet jetzt im Browser“ erscheint.
 - Browser öffnet sich, die App ist sichtbar.
 - PDF hochladen funktioniert.
@@ -50,14 +50,14 @@ API Keys bekommt ihr vom Workshop Team oder auf https://platform.openai.com/api-
 - Wichtig: „Add Python to PATH“ anklicken.
 
 **Mac/Linux: „Permission denied“**
-- Terminal: `chmod +x launchers/run.sh && ./launchers/run.sh`
+- Terminal: `chmod +x scripts/launchers/run.sh && ./scripts/launchers/run.sh`
 
 **„API Key nicht gefunden“**
 - `.env` prüfen: `OPENAI_API_KEY=sk-...`
 - Keine Leerzeichen um das `=`.
 
 **Port belegt**
-- Andere Streamlit App schließen oder Port in `launchers/run.*` ändern.
+- Andere Streamlit App schließen oder Port in `scripts/launchers/run.*` ändern.
 
 **Installation zu langsam**
 - Beim ersten Start dauert es 1-2 Minuten.

@@ -24,6 +24,15 @@ if %ERRORLEVEL% NEQ 0 (
     set PYTHON_CMD=python
 )
 
+REM Pruefe Python-Version (>=3.9)
+%PYTHON_CMD% -c "import sys; import sys; sys.exit(0 if sys.version_info >= (3,9) else 1)"
+if %ERRORLEVEL% NEQ 0 (
+    echo FEHLER: Python 3.9+ benötigt. Gefunden:
+    %PYTHON_CMD% --version
+    pause
+    exit /b 1
+)
+
 REM Venv anlegen, falls nicht vorhanden
 if not exist "venv\Scripts\activate.bat" (
     echo [1/4] Erstelle virtuelles Environment...

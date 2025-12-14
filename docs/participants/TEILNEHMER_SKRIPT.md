@@ -16,7 +16,7 @@
 5. Vergleich & Fragen (3 min)
 
 ## Vorbereitungen
-- Streamlit App per Doppelklick auf `launchers/run.*` starten oder manuell `python -m streamlit run app/app.py`
+- Streamlit App per Doppelklick auf `scripts/launchers/run.*` starten oder manuell `python -m streamlit run app/app.py`
 - Editor öffnen und folgende Dateien laden:
   - `app/agents/reader.py`
   - `app/agents/summarizer.py`

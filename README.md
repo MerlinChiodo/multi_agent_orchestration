@@ -46,8 +46,8 @@ Hinweis: Im Projekt enthält der LangGraph-Workflow zusätzlich Translator-/Keyw
 | DSPy | `structured`, `summary`, `critic`, `meta`, `latency_s`, `reader_s`… | `dspy_available` (+ optional Teleprompting) |
 
 ## Schnell starten
-- **Windows:** Doppelklick auf `launchers/run.bat`
-- **Mac/Linux:** Doppelklick auf `launchers/run.sh` (oder `chmod +x launchers/run.sh && ./launchers/run.sh`)
+- **Windows:** Doppelklick auf `scripts/launchers/run.bat`
+- **Mac/Linux:** Doppelklick auf `scripts/launchers/run.sh` (oder `chmod +x scripts/launchers/run.sh && ./scripts/launchers/run.sh`)
 
 Das Startskript prüft Python, legt ein virtuelles Environment an, installiert die Abhängigkeiten und startet Streamlit. Wenn `.env` neu angelegt wird, kommt eine kurze Erinnerung zum API-Key.
 
@@ -131,8 +131,9 @@ Mehr Details zur Einrichtung stehen in `docs/participants/START_HIER.md`.
 - `project_overview.md`: Hintergrund & Design
 
 ### Startskripte
-- `launchers/run.bat`: Windows Startskript
-- `launchers/run.sh`: Mac/Linux Startskript
+- `scripts/launchers/run.bat`: Windows Startskript
+- `scripts/launchers/run.sh`: Mac/Linux Startskript
+- `scripts/launchers/terminal_commands.md`: Manuelle Startbefehle für Terminal/PowerShell (falls der Doppelklick nicht klappt)
 
 ---
 

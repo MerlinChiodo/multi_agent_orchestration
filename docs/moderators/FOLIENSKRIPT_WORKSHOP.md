@@ -2,7 +2,7 @@
 
 Ziel: Ein verständlicher, durchgehbarer Ablauf mit wenigen Theorie-Slides, dann Live-Demo/Code, dann Aufgaben (Verständnis + Grenzen) und Wrap-Up.
 
-**Voraussetzung:** App läuft (`python -m streamlit run app/app.py`) oder Start per `launchers/run.*`.  
+**Voraussetzung:** App läuft (`python -m streamlit run app/app.py`) oder Start per `scripts/launchers/run.*`.  
 **Teilnehmer-Unterlagen:** `docs/participants/START_HIER.md`, `docs/participants/TEILNEHMER_SKRIPT.md`
 
 ---
