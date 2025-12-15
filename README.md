@@ -78,7 +78,7 @@ flowchart LR
   Summarizer --> Critic[Critic]
 
   Critic -->|Score ok| Integrator[Integrator]
-  Critic -->|Score zu niedrig (max 1 Loop)| Summarizer
+  Critic -->|Score zu niedrig| Summarizer
 
   Integrator --> Output[Output]
 ```
