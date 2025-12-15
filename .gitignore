@@ -16,3 +16,6 @@ telemetry.bak
 # OS
 .DS_Store
 Thumbs.db
+
+# Moderator-Dokumente
+docs/moderators/
