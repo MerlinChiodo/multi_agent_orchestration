@@ -1,7 +1,7 @@
 @echo off
 setlocal enabledelayedexpansion
-title Multi-Agent Orchestration - Workshop App
-REM Wechsel ins Projekt-Root (Startskripte liegen nun in launchers\)
+title Multi-Agent Orchestration
+REM Wechsel ins Projekt-Root (Startskripte liegen in launchers\)
 cd /d "%~dp0.."
 
 echo ========================================
