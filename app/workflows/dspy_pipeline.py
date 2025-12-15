@@ -30,6 +30,11 @@ DSPY_READY = HAVE_DSPY and HAVE_LITELLM
 
 
 def _lean_fallback(msg: str) -> Dict[str, Any]:
+    """
+    Fallback, wenn DSPy nicht verfügbar.
+    
+    Statt abzustürzen geben wir Fehlermeldung.
+    """
     return {
         "structured": "",
         "summary": "",
@@ -53,13 +58,22 @@ if not DSPY_READY:
 else:
     # DSPy configuration
     def _configure_dspy(cfg: Optional[Dict[str, Any]] = None):
-        """Configures DSPy language model. Uses LiteLLM for provider abstraction."""
+        """
+        Konfiguriert DSPy. Nutzt LiteLLM für Provider.
+        
+        DSPy nutzt eigene LM-Abstraktion, nicht von LangChain. Wir
+        konfigurieren (Modell, Temperatur usw.), aber über dspy.LM.
+        LiteLLM-Integration erlaubt, gleiche API-Keys und Base-URLs zu nutzen.
+        
+        Wird einmal pro Lauf der Pipeline aufgerufen, wie bei LangChain configure().
+        DSPy speichert LM in globalen Einstellungen.
+        """
         cfg = cfg or {}
         model = cfg.get("model", "gpt-4.1")
         base = cfg.get("api_base") or os.getenv("OPENAI_BASE_URL")
         api_key = cfg.get("api_key") or os.getenv("OPENAI_API_KEY", "")
         temperature = float(cfg.get("temperature", 0.0))
-        max_tokens = int(cfg.get("max_tokens", 256))
+        max_tokens = int(cfg.get("max_tokens", 4096))
 
         lm = dspy.LM(
             model=model,
@@ -70,9 +84,17 @@ else:
         )
         dspy.settings.configure(lm=lm)
 
-    # Sanitize output
     def _sanitize(s: str) -> str:
-        """Removes JSON fragments and excessive blank lines from LLM output."""
+        """
+        Entfernt JSON-Fragmente und Leerzeilen aus Ausgabe von LLM.
+        
+        Manchmal Ausgabe in JSON wie {"result": "..."},
+        auch wenn wir nicht danach fragen. Dies entfernt das. Vorallem bei Ollama LLMs notwendig gewesen.
+        Manche Modelle sehr großzügig mit Leerzeichen.
+        
+        Wir versuchten aggressiver zu sein (JSON richtig parsen). Das brach,
+        wenn Ausgabe kein gültiges JSON war.
+        """
         s = re.sub(r"^\s*[{[]\s*|\s*[}\]]\s*$", "", s or "", flags=re.S)
         s = re.sub(r"\n{3,}", "\n\n", s)
         return s.strip()
@@ -103,13 +125,13 @@ else:
         NOTES: str = dspy.OutputField(desc="Structured scientific notes following the schema above, no JSON, no extra prose")
 
     class Summarize(dspy.Signature):
-        """Produce a concise scientific summary (200-300 words) from NOTES.
+        """Produce a concise scientific summary from NOTES.
         Cover in this order: Objective -> Method (what/how) -> Results (numbers if present; otherwise write exactly 'No quantitative metrics reported in provided text.')
         -> Limitations -> 3-5 Practical Takeaways (bulleted).
         Avoid speculation or citations. Do NOT invent metrics; if NOTES Results contains the exact sentence
         'No quantitative metrics reported in provided text.', then the summary Results must use that exact sentence and contain no numbers."""
         NOTES: str = dspy.InputField(desc="Structured scientific notes")
-        SUMMARY: str = dspy.OutputField(desc="200-300 word summary covering objective, method, results, limitations, and takeaways")
+        SUMMARY: str = dspy.OutputField(desc="Scientific summary covering objective, method, results, limitations, and takeaways")
 
     class Critique(dspy.Signature):
         """Critique SUMMARY against NOTES. Judge for makes sense, accuracy, coverage, and details.
@@ -142,9 +164,16 @@ else:
         CRITIC: str = dspy.InputField(desc="Critique feedback with rubric scores")
         META: str = dspy.OutputField(desc="Executive meta-summary with objective, method, results, limitations, takeaways, open questions, and confidence")
 
-    # Modules
+    # jedes Module wickelt DSPy Signature in ein Module
     class ReaderM(dspy.Module):
-        """Reader module using declarative signature."""
+        """
+        Reader-Modul mit deklarativer Signature.
+        
+        DSPy erzeugt das Prompt aus der ReadNotes-Signature. Wir schreiben
+        keine Prompts manuell - beschreiben nur, was wir wollen. _sanitize()
+        bereinigt JSON-Formatierung, die das LLM hinzufügen könnte. Manche
+        Modelle wickeln Ausgabe in {} ein.
+        """
         def __init__(self):
             super().__init__()
             self.gen = dspy.Predict(ReadNotes)
@@ -154,7 +183,13 @@ else:
             return dspy.Prediction(NOTES=_sanitize(out.NOTES))
 
     class SummarizerM(dspy.Module):
-        """Summarizer module that creates summaries from notes using declarative signatures."""
+        """
+        Summarizer, der Zusammenfassungen aus Notizen mit
+        Signatures erstellt.
+        
+        Unterstützt sowohl 'notes' als auch 'NOTES' Parameternamen. Mancher Code
+        nutzt Kleinbuchstaben, manche Großbuchstaben. Akzeptieren beide für Flexibilität.
+        """
         def __init__(self):
             super().__init__()
             self.gen = dspy.Predict(Summarize)
@@ -186,7 +221,9 @@ else:
             out = self.gen(NOTES=notes, SUMMARY=summary, CRITIC=critic)
             return dspy.Prediction(META=_sanitize(out.META))
 
-    # Pipeline
+    # Pipeline für alle Module
+    # Ähnlich wie LangChain sequenzieller Ansatz, aber Module sind deklarativ
+    # (Signatures) statt (Prompt-Strings)
     class PaperPipeline(dspy.Module):
         def __init__(self):
             super().__init__()
@@ -196,6 +233,7 @@ else:
             self.integrator = IntegratorM()
 
         def forward(self, input_text: str):
+            # Zeit messen
             t0 = perf_counter()
             notes = self.reader(input_text).NOTES
             t1 = perf_counter()
@@ -215,7 +253,7 @@ else:
                 total_s=round(t4 - t0, 2),
             )
 
-    # Optional teleprompting
+    # Optionale Teleprompting
     def _word_f1(pred: str, gold: str) -> float:
         ps = set(w.lower() for w in re.findall(r"\w+", pred))
         gs = set(w.lower() for w in re.findall(r"\w+", gold))
@@ -248,13 +286,17 @@ else:
 
     def _teleprompt_if_requested(pipeline: PaperPipeline, cfg: Dict[str, Any]):
         """
-        Optimizes DSPy pipeline using BootstrapFewShot.
+        Optimiert Pipeline mit BootstrapFewShot.
         
-        Instead of tuning prompts manually, we provide examples. DSPy finds
-        better strategies. BootstrapFewShot tries different few-shot combinations.
-        It picks the best by word F1. We only optimize summarizer as example.
-        We tried optimizing all modules. Summarizer has biggest impact. Full
-        optimization is too slow for interactive use.
+        Statt Prompts manuell zu tunen, liefern wir Beispiele. DSPy findet
+        dann bessere Strategien. BootstrapFewShot probiert verschiedene Few-Shot-
+        Kombinationen. Es wählt das Beste nach Wort-F1. Wir optimieren nur
+        Summarizer als Beispiel. Zwar versuchten wir alle Modules zu optimieren aber
+        Summarizer hat größten Einfluss. Vollständige Optimierung zu langsam.
+        
+        max_bootstrapped_demos=3 Grenze ist daher Kompromiss. Mehr Demos =
+        bessere Optimierung, aber exponentiell langsamer. Wir probierten
+        5 und 10. Die Gewinne waren das lange Warten nicht wert daher 3.
         """
         if not cfg.get("dspy_teleprompt"):
             return
@@ -263,6 +305,8 @@ else:
         if not dev:
             return
 
+        # Metriken
+        # Wort-F1 ist einfach aber effektiv.
         def _metric(gold, pred, trace=None):
             pred_text = ""
             if hasattr(pred, "SUMMARY"):
@@ -276,8 +320,8 @@ else:
 
         tp = dspy.teleprompt.BootstrapFewShot(
             metric=_metric,
-            max_bootstrapped_demos=3,
-            max_labeled_demos=3,
+            max_bootstrapped_demos=3, # mit 3 eher klein wegen Geschwindigkeit
+            max_labeled_demos=3, # hier auch
         )
         trainset = []
         note_gold_pairs: List[Tuple[str, str]] = []
@@ -286,15 +330,19 @@ else:
         for entry in dev:
             text = entry["text"]
             gold = entry["target_summary"]
+            # Reader ausführen, für Notizen. Das sieht Summarizer tatsächlich
             notes = pipeline.reader(text).NOTES
             trainset.append(dspy.Example(NOTES=notes, SUMMARY=gold).with_inputs("NOTES"))
             note_gold_pairs.append((notes, gold))
+            # Metadaten für Reporting, was Dev-Set abdeckt
             target_lengths.add(entry.get("target_length") or "medium")
             prompt_focuses.add(entry.get("prompt_focus") or "Results")
 
         if not trainset:
             return
 
+        # Score-Funktion, um Modul zu bewerten. Testen auf demselben Dev-Set,
+        # auf dem wir trainieren. Ziel: bessere Prompts finden, nicht Generalisierung zu messen.
         def _score_module(module):
             scores = []
             for notes, gold in note_gold_pairs:
@@ -302,10 +350,13 @@ else:
                 scores.append(_metric(gold, pred))
             return sum(scores) / len(scores) if scores else 0.0
 
+        # Score vor Optimierung
         base_score = _score_module(pipeline.summarizer)
+        # Hier findet DSPy bessere Prompt-Beispiele
         optimized_summarizer = tp.compile(pipeline.summarizer, trainset=trainset)
         pipeline.summarizer = optimized_summarizer
 
+        # Score nach Optimierung: sehen, ob wir verbessert haben
         optimized_score = _score_module(pipeline.summarizer)
         gain = optimized_score - base_score
         choice = f"BootstrapFewShot(demos={len(trainset)})"
@@ -341,10 +392,12 @@ else:
         metrics_count = count_numeric_results(out.NOTES)
         confidence_line = extract_confidence_line(out.META)
 
-        # Use the sum of individual timings as latency, or fallback to measured time
+        # Summe einzelner Zeiten als Latenz nutzen, oder Fallback auf gemessene Zeit
+        # Manchmal Summe größer (bei Overhead), manchmal gemessene (bei überlappenden
+        # Schritten).
         calculated_latency = (out.reader_s + out.summarizer_s + out.critic_s + out.integrator_s)
         measured_latency = round(t1 - t0, 2)
-        # Use the larger of the two to ensure we capture all processing time
+        # Größere der beiden nutzen, dass wir alle Verarbeitungszeit erfassen
         final_latency = max(calculated_latency, measured_latency)
 
         result = {

@@ -42,8 +42,6 @@ def _clean_output_text(raw_output: str) -> str:
 
 
 def run(notes: str = "", summary: str = "", *args, **kwargs) -> Dict[str, Any]:
-    """Evaluate summary against original notes."""
-    # Keep backward compatibility
     if args and not kwargs:
         notes_text = args[0]
         summary_text = args[1] if len(args) > 1 else ""

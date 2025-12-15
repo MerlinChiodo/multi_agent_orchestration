@@ -1,6 +1,3 @@
-"""
-LangChain Pipeline: Sequential execution.
-"""
 
 from __future__ import annotations
 
@@ -23,11 +20,14 @@ from utils import (
 
 def run_pipeline(input_text: str, config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """
-    Runs LangChain pipeline sequentially.
+    LangChain Pipeline sequenziell.
     
-    Simple linear flow: reader -> summarizer -> critic -> integrator.
-    No conditional routing or loops. We considered error recovery between steps.
-    We kept it minimal to show the base pattern.
+    Linearer Ablauf: reader -> summarizer -> critic -> integrator.
+    Kein bedingtes Routing oder Schleifen. Wir dachten über Fehlerbehandlung
+    zwischen Schritten nach. Allerding minimal, um Muster zu zeigen.
+    Das ist absichtlich einfach. Retry-Logik oder Fallbacks nach würden es schwerer machen
+    zu sehen, was LangGraph hinzufügt. execution_trace dient nur
+    Debuggen und für Telemetrie.
     """
     config_dict = config or {}
     configure(config_dict)
@@ -35,6 +35,8 @@ def run_pipeline(input_text: str, config: Optional[Dict[str, Any]] = None) -> Di
     execution_trace = ["retriever"]
     analysis_context = build_analysis_context(input_text, config_dict)
     
+    # Um keine API-Aufrufe zu verschwenden direkt Plausibilitätsprüfung wenn wir praktisch nichts bekommen,
+    # Schwellwert von 100 Zeichen ist niedrig, fängt z. B.  PDF-Parsing-Fehler ab.
     if not analysis_context or len(analysis_context.strip()) < 100:
         return _create_error_response(
             "No valid text detected. Try disabling truncation or re-uploading the PDF."
@@ -76,6 +78,10 @@ def run_pipeline(input_text: str, config: Optional[Dict[str, Any]] = None) -> Di
         "integrator_s": integrator_duration,
     }
     
+    # In CSV loggen für Analyse. Wir erfassen alles: Zeiten, Längen, Metrik-Anzahl.
+    # Hilft zu sehen welcher Schritt langsam ist, welche Papers Ergebnisse
+    # haben, usw. Telemetrie istaber optional (deaktivierbar mit csv_telemetry=False) aktuell nicht auf UI,
+    # aber standardmäßig aktiviert. Genutzt für Debugging und Performance
     if config_dict.get("csv_telemetry", True):
         log_row({
             "engine": "langchain",
@@ -107,7 +113,15 @@ def run_pipeline(input_text: str, config: Optional[Dict[str, Any]] = None) -> Di
 
 
 def _create_error_response(error_message: str) -> Dict[str, Any]:
-    """Creates error response."""
+    """
+    Erstellt error response.
+    
+    Vorallem beim Testen und Debuggen benötigt z.B. ging etwas schief (leerer Input, Parsing-Fehler, etc.), geben wir
+    Antwort mit gleicher Struktur wie ein erfolgreicher Lauf.
+    Aber mit leeren Strings und Fehlermeldung im meta-Feld. 
+    UI zeigt Fehler ohne Sonderbehandlung. Telemetrie trotzdem
+    geloggt.
+    """
     return {
         "structured": "[Input empty or too short]",
         "summary": "",

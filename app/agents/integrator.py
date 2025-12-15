@@ -34,8 +34,6 @@ def _clean_output_text(raw_output: str) -> str:
 
 
 def run(notes: str = "", summary: str = "", critic: str = "", *args, **kwargs) -> str:
-    """Creates final meta-summary from notes, summary, and critic."""
-    # Backward compatibility
     if args and not kwargs:
         notes_text = args[0]
         summary_text = args[1] if len(args) > 1 else ""

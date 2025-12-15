@@ -1,6 +1,3 @@
-"""
-LangGraph Pipeline: Graph-based execution with conditional loops.
-"""
 
 from __future__ import annotations
 
@@ -55,6 +52,13 @@ def _append_trace(state: PipelineState, label: str) -> None:
 
 
 def _append_route(state: PipelineState, route: str) -> None:
+    """
+    Hängt Route an Routing Trace an.
+    
+    Ähnlich wie execution_trace, aber verfolgt Routing. Wenn Critic zurück zum Summarizer routet, loggen wir das. Hilft zu
+    verstehen, warum Graph einen bestimmten Pfad nahm. routing_trace ist
+    getrennt von execution_trace. Eine Node kann mehrmals ausgeführt werden.
+    """
     routes = state.get("routing_trace")
     if not isinstance(routes, list):
         routes = []
@@ -68,10 +72,16 @@ def _execute_with_timeout(
     timeout_default_value: str = "__TIMEOUT__"
 ) -> Any:
     """
-    Runs function with timeout protection.
+    Führt Funktion mit timeout protection aus.
     
-    LLM calls can hang. ThreadPoolExecutor interrupts them after timeout_seconds.
-    Without this, one slow API call blocks the whole pipeline.
+    Aufrufe zum LLM bleiben teilweise hängen. ThreadPoolExecutor bricht nach
+    timeout_seconds ab. So blockiert kein langsamer API-Aufruf gesamte Pipeline.
+    
+    Zuerst probiert mit signal-basierten Timeouts. Funktionieren nicht
+    gut mit Threads. ThreadPoolExecutor ermöglicht sauberes Abbrechen.
+    "__TIMEOUT__" String ist etwas umständlich, aber eindeutig. Man kann ihn
+    leicht erkennen. Wir könnten None zurückgeben, dann müssten wir überall
+    auf None prüfen.
     """
     with cf.ThreadPoolExecutor(max_workers=1) as executor:
         future = executor.submit(function)
@@ -92,7 +102,18 @@ def _execute_retriever_node(state: PipelineState) -> PipelineState:
 
 
 def _execute_reader_node(state: PipelineState) -> PipelineState:
-    """Executes Reader agent."""
+    """
+    Führt Reader-Agent aus.
+    
+    Jede Node-Funktion folgt dem gleichen Muster: Trace anhängen, Zeit messen,
+    mit Timeout ausführen, Ergebnis speichern, aktualisierten State zurückgeben.
+    Der Timeout-Wrapper verhindert Hänger. Dauert der LLM-Aufruf zu lange,
+    geben wir einen Timeout-Wert zurück statt ewig zu blockieren.
+    
+    Wir bevorzugen analysis_context gegenüber input_text. analysis_context ist
+    vorverarbeitet. Metadaten wurden entfernt. Das liefert bessere Ergebnisse.
+    Falls analysis_context nicht gesetzt ist, nutzen wir rohen Input als Fallback.
+    """
     _append_trace(state, "reader")
     start_time = perf_counter()
     timeout_seconds = state.get("_timeout", 45)
@@ -104,7 +125,12 @@ def _execute_reader_node(state: PipelineState) -> PipelineState:
 
 
 def _execute_summarizer_node(state: PipelineState) -> PipelineState:
-    """Executes Summarizer agent."""
+    """
+    Kann mehrmals laufen, wenn Critic hierher zurückroutet. Bei jedem
+    Lauf bekommt er gleiche Notizen. Er kann aber eine andere Zusammenfassung
+    produzieren. LLMs nicht deterministisch, außer temperature=0.
+    Zeitmessung erfasst jede Ausführung separat. So sehen wir, wie oft es lief.
+    """
     _append_trace(state, "summarizer")
     start_time = perf_counter()
     timeout_seconds = state.get("_timeout", 45)
@@ -115,7 +141,14 @@ def _execute_summarizer_node(state: PipelineState) -> PipelineState:
 
 
 def _execute_critic_node(state: PipelineState) -> PipelineState:
-    """Executes Critic agent."""
+    """
+    Führt Critic-Agent aus.
+    
+    Critic braucht Notizen und Zusammenfassung. Er vergleicht sie.
+    Ergebnis kann ein Dictionary sein mit Schlüssel "critic" oder "critique".
+    Es kann auch ein String sein. Wir behandeln beide Fälle. Critic-Text wird von Routing genutzt. Entscheidet dann,
+    ob zurückgeloopt oder vorwärts läuft.
+    """
     _append_trace(state, "critic")
     start_time = perf_counter()
     timeout_seconds = state.get("_timeout", 45)
@@ -124,6 +157,7 @@ def _execute_critic_node(state: PipelineState) -> PipelineState:
         timeout_seconds
     )
     
+    # Critic gibt Dictionary oder String zurück daher beide behandeln
     if isinstance(critic_result, dict):
         critic_text = critic_result.get("critic") or critic_result.get("critique") or ""
     else:
@@ -135,13 +169,6 @@ def _execute_critic_node(state: PipelineState) -> PipelineState:
 
 
 def _extract_critic_score(state: PipelineState) -> float:
-    """
-    Extracts score from critic text.
-    
-    Critic returns text like "Makes sense: 4" or "Accuracy: 4". We find the first number.
-    If it is greater than 1.0, we assume a 0-5 scale. Then we convert
-    to 0-1 for routing.
-    """
     text = state.get("critic", "") or ""
     match = re.search(r"([0-9]+(?:\.[0-9]+)?)", text)
     if match:
@@ -157,23 +184,33 @@ def _extract_critic_score(state: PipelineState) -> float:
 
 def _critic_post_path(state: PipelineState) -> str:
     """
-    Routes based on critic score.
+    Routet basierend auf Critic-Bewertung.
     
-    If score is below 0.5, route back to summarizer. The system can fix
-    bad summaries automatically. We limit loops to avoid infinite cycles.
-    First we tried fixed 3 retries. Configurable max_loops fits better
-    for different use cases.
+    Liegt Bewertung unter 0.5, geht es zurück zum Summarizer. System
+    kann schlechte Zusammenfassungen automatisch korrigieren. Begrenzen
+    Schleifen, um Endlosschleifen zu vermeiden. Zuerst versuchten wir feste
+    3 Retries. Konfigurierbare max_loops passt besser für verschiedene
+    Anwendungsfälle.
+    
+    Schwellwert 0.5 ist eher willkürlich. Haben 0.6 und 0.4 getestet.
+    Niedrigerer Schwellwert: weniger Schleifen, aber wir verpassen
+    vielleicht behebbare Probleme. Höher bedeutet mehr Schleifen und höhere
+    Kosten. 0.5 schien wie gute Balance. Ggf auch konfigurierbar
+    machen
     """
     _extract_critic_score(state)
     loops = state.get("critic_loops", 0)
     cfg = state.get("_config", {}) or {}
     max_loops = max(0, int(cfg.get("max_critic_loops", 2)))
     
+    # Niedrige Bewertung und noch nicht zu oft geloopt? Summarizer bekommt noch eine Chance. 
+    # Das ist Hauptunterschied zu LangChain wir können schlechte Ausgaben tatsächlich korrigieren.
     if state["critic_score"] < 0.5 and loops < max_loops:
         state["critic_loops"] = loops + 1
         _append_route(state, "summarizer")
         return "summarizer"
     
+    # Gut genug oder genug Versuche. Weiter zum Integrator.
     _append_route(state, "integrator")
     return "integrator"
 
@@ -193,7 +230,15 @@ def _execute_integrator_node(state: PipelineState) -> PipelineState:
 
 
 def _generate_graph_visualization_dot(state: Optional[PipelineState] = None) -> str:
-    """Generates Graphviz representation of workflow."""
+    """
+    Erzeugt Graphviz-Darstellung des Workflows.
+    
+    Erstellt DOT-Datei, die als Graph dargestellt wird.  Ist State vorhanden,
+    fügen wir Informationen zur Zeit und Bewertungen hinzu.
+    
+    Farben und das Styling waren etwas willkürlich. Wir wollten, dass es
+    in der UI gut aussieht. Man könnte es konfigurierbar machen
+    """
     if state is None:
         return r"""
 digraph G {
@@ -251,38 +296,55 @@ digraph G {{
 
 def _build_langgraph_workflow() -> Any:
     """
-    Builds LangGraph workflow.
+    LangGraph Workflow.
     
-    Flow: retriever -> reader -> summarizer -> critic -> (conditional) -> integrator
-    The conditional edge allows return to summarizer on low quality. This is
-    the main difference from LangChain: explicit state and conditional routing.
-    We considered parallel branches like translator or keyword nodes. We kept
-    it simple to match base requirements.
+    Ablauf: retriever -> reader -> summarizer -> critic -> (conditional) -> integrator
+    Conditional Node erlaubt Sprung zum Summarizer bei niedriger Qualität.
+    Das ist Hauptunterschied zu LangChain: expliziter State und bedingtes
+    Routing. Wir dachten über parallele Zweige nach, z.B. Translator oder
+    Keyword-Nodes. Aber reichen für Anforderungen.
+    
+    Graph-Struktur ist recht einfach. Linearer Ablauf mit einer Bedingung.
+    Wir dachten über weitere Nodes nach. Würde auch Vergleich mit LangChain
+    erschweren. Cnditional Routing ist Hauptfunktion, die wir zeigen wollen.
     """
     graph = StateGraph(PipelineState)
+    # Alle Nodes: jede ist eine Funktion, die State nimmt und aktualisierten State zurückgibt
     graph.add_node("retriever", _execute_retriever_node)
     graph.add_node("reader", _execute_reader_node)
     graph.add_node("summarizer", _execute_summarizer_node)
     graph.add_node("critic_node", _execute_critic_node)
     graph.add_node("integrator", _execute_integrator_node)
     
+    # lineare Kanten, dann eine Bedingung
     graph.set_entry_point("retriever")
     graph.add_edge("retriever", "reader")
     graph.add_edge("reader", "summarizer")
     graph.add_edge("summarizer", "critic_node")
+    # Das ist interessanter Teil: Critic kann zurück zum Summarizer oder zum Integrator routen
     graph.add_conditional_edges("critic_node", _critic_post_path)
     graph.add_edge("integrator", END)
     return graph.compile()
 
 
 def run_pipeline(input_text: str, config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """Executes LangGraph pipeline."""
+    """
+    Führt LangGraph Pipeline aus.
+    
+    Workflow-Graph wird gebaut, richten initialen State ein und rufen ihn auf. LangGraph übernimmt die Ausführung: führt Nodes in Reihenfolge aus, folgt conditional Nodes und verwaltet
+    State. Wir müssen nur initialen State bereitstellen, Rest passiert automatisch.
+    
+     _timeout und _config im State sind "privat", gehören nicht
+    zu eigentlichen Daten von Pipeline. Sie dienen nur der Konfiguration.
+    """
     config_dict = config or {}
     configure(config_dict)
     timeout_seconds = int(config_dict.get("timeout", 45))
     start_total = perf_counter()
     
     workflow = _build_langgraph_workflow()
+    # State initialisieren alle Felder starten leer/null. Nodes füllen sie
+    # während der Ausführung. _timeout und _config sind Metadaten, keine Daten.
     initial_state = {
         "input_text": input_text or "",
         "analysis_context": "",
@@ -303,6 +365,8 @@ def run_pipeline(input_text: str, config: Optional[Dict[str, Any]] = None) -> Di
         "_config": config_dict,
     }
     
+    # LangGraph führt Graph aus
+    # Folgt Kanten, führt Nodes aus, behandelt Bedingungen, verwaltet Schleifen
     final_state = workflow.invoke(initial_state)
     total_duration = round(perf_counter() - start_total, 2)
     input_chars = len(final_state.get("analysis_context") or input_text or "")

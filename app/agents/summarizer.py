@@ -31,12 +31,10 @@ SUMMARIZER_PROMPT = ChatPromptTemplate.from_template(
 
 
 def _clean_output_text(raw_output: str) -> str:
-    """Removes leading/trailing whitespace."""
     return (raw_output or "").strip()
 
 
 def run(structured_notes: str) -> str:
-    """Creates summary from structured notes."""
     prompt_chain = SUMMARIZER_PROMPT | llm
     llm_response = prompt_chain.invoke({"notes": structured_notes})
     output_text = getattr(llm_response, "content", llm_response)

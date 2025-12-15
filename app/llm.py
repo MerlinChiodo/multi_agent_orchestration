@@ -26,7 +26,6 @@ def _create_openai_llm(
     request_timeout_seconds: int,
     api_key: Optional[str] = None,
 ) -> ChatOpenAI:
-    """Return ChatOpenAI instance."""
     api_key = api_key or os.getenv("OPENAI_API_KEY")
     if not api_key:
         raise ValueError(
@@ -45,7 +44,6 @@ def _create_openai_llm(
 
 
 def configure(config: Optional[dict] = None) -> None:
-    """Set ChatOpenAI instance."""
     global _llm_instance
 
     config_dict = config or {}
@@ -54,7 +52,7 @@ def configure(config: Optional[dict] = None) -> None:
     base_url = config_dict.get("api_base") or os.getenv("OPENAI_BASE_URL", None)
     api_key = config_dict.get("api_key") or os.getenv("OPENAI_API_KEY")
     temperature = float(config_dict.get("temperature") or os.getenv("OPENAI_TEMPERATURE", "0.0"))
-    max_output_tokens = int(config_dict.get("max_tokens") or os.getenv("OPENAI_MAX_TOKENS", "256"))
+    max_output_tokens = int(config_dict.get("max_tokens") or os.getenv("OPENAI_MAX_TOKENS", "4096"))
     request_timeout = int(config_dict.get("timeout") or os.getenv("OPENAI_TIMEOUT", "45"))
 
     _llm_instance = _create_openai_llm(

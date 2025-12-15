@@ -46,13 +46,29 @@ READER_PROMPT = ChatPromptTemplate.from_template(
 
 
 def _clean_output_text(raw_output: str) -> str:
-    """Removes leading/trailing whitespace."""
+    """
+    Entfernt führende und nachfolgende Leerzeichen.
+    
+    LLMs fügen manchmal zusätzliche Zeilenumbrüche oder Leerzeichen hinzu.
+    Einfache Bereinigung. Behandeln None/leer elegant. Besser leerer String
+    zurückgeben als abstürzen.
+    """
     return (raw_output or "").strip()
 
 
 def run(input_text: str) -> str:
-    """Extracts structured notes from paper text."""
+    """
+    Extrahiert strukturierte Notizen aus Paper-Text.
+    
+    Erster Schritt. Nimmt rohen Paper-Text und extrahiert strukturierte Notizen.
+    Titel, Ziel, Methoden, Ergebnisse usw. Prompt ziemlich detailliert mit
+    vielen Regeln. Brauchen konsistentes Ausgabeformat.
+    
+    getattr() etwas defensiv. Manchmal llm_response String, manchmal Objekt
+    mit .content. Behandelt beide Fälle.
+    """
     prompt_chain = READER_PROMPT | llm
     llm_response = prompt_chain.invoke({"content": input_text})
+    # Beide Fälle behandeln: String-Antworten und Objekt-Antworten
     output_text = getattr(llm_response, "content", llm_response)
     return _clean_output_text(output_text)
